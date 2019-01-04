@@ -20,20 +20,21 @@ static void EVP_print_errors()
 }
 
 int crypher_aes256gcm_encrypt(struct buf *src,
-                              struct buf **dst, struct buf **tag,
+                              struct buf **new_dst, struct buf **new_tag,
                               struct buf *iv, struct buf *key)
 {
     EVP_CIPHER_CTX *c;
     int len, ciphertext_len;
+    struct buf *dst, *tag;
     int rc = -1;
     int evp_rc;
 
-    *dst = buf_alloc(src->len);
-    if (!*dst)
+    dst = buf_alloc(src->len);
+    if (!dst)
         goto out;
 
-    *tag = buf_alloc(16);
-    if (!*tag)
+    tag = buf_alloc(12);
+    if (!tag)
         goto out;
 
     c = EVP_CIPHER_CTX_new();
@@ -59,26 +60,24 @@ int crypher_aes256gcm_encrypt(struct buf *src,
 
     ciphertext_len = 0, len = 0;
 
-    evp_rc = EVP_EncryptUpdate(c, (*dst)->data, &len, src->data, src->len);
+    evp_rc = EVP_EncryptUpdate(c, dst->data, &len, src->data, src->len);
     if (evp_rc != 1) {
         print_e("can't encrypt\n");
         EVP_print_errors();
         goto out;
     }
     ciphertext_len = len;
-    printf("ciphertext_len = %d\n", ciphertext_len);
 
-    evp_rc = EVP_EncryptFinal_ex(c, (*dst)->data + len, &len);
+    evp_rc = EVP_EncryptFinal_ex(c, dst->data + len, &len);
     if (evp_rc != 1) {
         print_e("can't finished encrypt\n");
         EVP_print_errors();
         goto out;
     }
     ciphertext_len += len;
-    printf("ciphertext_len = %d\n", ciphertext_len);
-    (*dst)->len = ciphertext_len;
+    dst->len = ciphertext_len;
 
-    evp_rc = EVP_CIPHER_CTX_ctrl(c, EVP_CTRL_GCM_GET_TAG, 16, (*tag)->data);
+    evp_rc = EVP_CIPHER_CTX_ctrl(c, EVP_CTRL_GCM_GET_TAG, 12, tag->data);
     if (evp_rc != 1) {
         print_e("can't get TAG\n");
         EVP_print_errors();
@@ -86,16 +85,16 @@ int crypher_aes256gcm_encrypt(struct buf *src,
     }
     EVP_CIPHER_CTX_free(c);
     rc = 0;
-    buf_ref(*dst);
-    buf_ref(*tag);
+    *new_dst = buf_ref(dst);
+    *new_tag = buf_ref(tag);
 out:
-    buf_deref(*dst);
-    buf_deref(*tag);
+    buf_deref(dst);
+    buf_deref(tag);
     return rc;
 }
 
 
-int crypher_aes256gcm_decrypt(struct buf *src, struct buf **dst,
+int crypher_aes256gcm_decrypt(struct buf *src, struct buf **new_dst,
                               struct buf *tag, struct buf *iv,
                               struct buf *key)
 {
@@ -103,9 +102,10 @@ int crypher_aes256gcm_decrypt(struct buf *src, struct buf **dst,
     int len, dst_len;
     int rc = -1;
     int evp_rc;
+    struct buf *dst;
 
-    *dst = buf_alloc(src->len);
-    if (!*dst)
+    dst = buf_alloc(src->len);
+    if (!dst)
         goto out;
 
     c = EVP_CIPHER_CTX_new();
@@ -129,7 +129,7 @@ int crypher_aes256gcm_decrypt(struct buf *src, struct buf **dst,
         goto out;
     }
 
-    evp_rc = EVP_DecryptUpdate(c, (*dst)->data, &len, src->data, src->len);
+    evp_rc = EVP_DecryptUpdate(c, dst->data, &len, src->data, src->len);
     if (evp_rc != 1) {
         print_e("can't decrypt\n");
         EVP_print_errors();
@@ -137,14 +137,14 @@ int crypher_aes256gcm_decrypt(struct buf *src, struct buf **dst,
     }
     dst_len = len;
 
-    evp_rc = EVP_CIPHER_CTX_ctrl(c, EVP_CTRL_GCM_SET_TAG, 16, tag->data);
+    evp_rc = EVP_CIPHER_CTX_ctrl(c, EVP_CTRL_GCM_SET_TAG, 12, tag->data);
     if (evp_rc != 1) {
         print_e("Can't set TAG\n");
         EVP_print_errors();
         goto out;
     }
 
-    evp_rc = EVP_DecryptFinal_ex(c, (*dst)->data + len, &len);
+    evp_rc = EVP_DecryptFinal_ex(c, dst->data + len, &len);
     if (evp_rc != 1) {
         rc = -2;
         print_e("can't finalize decrypt\n");
@@ -152,40 +152,50 @@ int crypher_aes256gcm_decrypt(struct buf *src, struct buf **dst,
         goto out;
     }
     dst_len += len;
-    (*dst)->len = dst_len;
+    dst->len = dst_len;
 
     EVP_CIPHER_CTX_free(c);
     rc = 0;
-    buf_ref(*dst);
+    *new_dst = buf_ref(dst);
 out:
-    buf_deref(*dst);
+    buf_deref(dst);
     return rc;
 }
 
-struct buf *md5sum(struct buf *src)
+struct buf *md5sum(struct buf *src_buf, uint md5len)
 {
     MD5_CTX md5;
-    uint len;
-    u8 *p;
-    struct buf *dst = buf_alloc(16);
+    int len;
+    u8 *src;
+    char md5buf[16];
+    uint dst_cnt = 0;
+
+    struct buf *dst = buf_alloc(md5len);
     if (!dst) {
         perror("Can't alloc for md5summ\n");
         return NULL;
     }
 
-    p = src->data;
-    len = src->len;
-    MD5_Init(&md5);
-    while (len > 0) {
-        if (len > 512)
-            MD5_Update(&md5, p, 512);
-        else
-            MD5_Update(&md5, p, len);
-
-        len -= 512;
-        p += 512;
+    src = src_buf->data;
+    len = src_buf->len;
+    while(dst_cnt < md5len) {
+        uint part_len = ((md5len - dst_cnt) < sizeof md5buf) ?
+                              md5len - dst_cnt : sizeof md5buf;
+        MD5_Init(&md5);
+        while (len > 0) {
+            if (len > 512)
+                MD5_Update(&md5, src, 512);
+            else
+                MD5_Update(&md5, src, len);
+            len -= 512;
+            src += 512;
+        }
+        MD5_Final(md5buf, &md5);
+        memcpy(dst->data + dst_cnt, md5buf, part_len);
+        dst_cnt += part_len;
+        src = md5buf;
+        len = sizeof md5buf;
     }
-    MD5_Final(dst->data, &md5);
     return dst;
 }
 

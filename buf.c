@@ -4,6 +4,7 @@
 static void buf_destructor(void *mem)
 {
     struct buf *buf = (struct buf *)mem;
+    memset(buf->data, 0, buf->len);
     kmem_deref(buf->data);
 }
 
@@ -44,7 +45,7 @@ void *buf_concatenate(struct buf *b1, struct buf *b2)
         return NULL;
 
     memcpy(result->data, b1->data, b1->len);
-    memcpy(result + b1->len, b2->data, b2->len);
+    memcpy(result->data + b1->len, b2->data, b2->len);
     return result;
 }
 
@@ -67,7 +68,7 @@ void buf_dump(struct buf *buf, char *name)
                 printf("%.2x ", buf->data[cnt + row_cnt]);
             else
                 printf("   ");
-            if (row_cnt == 8)
+            if (row_cnt == 7)
                 printf(": ");
         }
         printf("| ");
@@ -81,4 +82,14 @@ void buf_dump(struct buf *buf, char *name)
         cnt += row_len;
         printf("\n");
     }
+}
+
+struct buf *buf_cpy(void *src, uint len)
+{
+    struct buf *buf = buf_alloc(len);
+    if (!buf)
+        return NULL;
+
+    memcpy(buf->data, src, len);
+    return buf;
 }

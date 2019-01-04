@@ -20,15 +20,10 @@ static inline struct buf *bufz_alloc(uint size)
     return buf;
 }
 
-static inline void buf_deref(struct buf *buf)
-{
-    void *mem = kmem_deref(buf);
-    if (!mem)
-        memset(buf->data, 0, buf->len);
-
-}
-
-#define buf_ref(buf) kmem_ref(buf)
+#define buf_deref(buf) kmem_deref(buf)
+struct buf *buf_cpy(void *src, uint len);
+#define buf_ref(buf) kmem_ref(buf);
+void *buf_concatenate(struct buf *b1, struct buf *b2);
 void buf_dump(struct buf *buf, char *name);
 
 #endif /* BUF_H_ */

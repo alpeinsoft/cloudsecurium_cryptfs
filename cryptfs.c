@@ -16,10 +16,6 @@ struct cryptfs {
     struct fuse *fuse;
 };
 
-struct key_file_uncrypt {
-    u8 data_key[64];
-    u8 header_iv[12];
-};
 
 static void cryptfs_destructor(void *mem)
 {
