@@ -7,9 +7,10 @@
 #ifndef COMMON_H_
 #define COMMON_H_
 
-#define print_e(format, ...) \
+#define print_e(format, ...) { \
     fprintf(stderr, "%s +%d: ", __FILE__, __LINE__); \
-    fprintf(stderr, (format), ##__VA_ARGS__)
+    fprintf(stderr, (format), ##__VA_ARGS__); \
+}
 
 
 static inline void print_backtrace()
