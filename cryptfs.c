@@ -1,17 +1,25 @@
 #include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 #include <time.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <fuse.h>
+#include <unistd.h>
 #include "kref_alloc.h"
-#include "common.h"
+#include "key_file.h"
+#include "crypher.h"
+#include "cryptfs.h"
+#include "buf.h"
 
 struct cryptfs {
-    struct ubuf *key_file_data;
+    char *key_filename;
 
-    struct ubuf *data_key;
-    struct ubuf *header_key;
-    struct ubuf *header_iv;
+    struct key_file *key_file;
+    struct buf *header_key;
 
     char *folder;
-    char *mount_point_path;
+    char *mount_point_folder;
     struct fuse_chan *fc;
     struct fuse *fuse;
 };
@@ -20,26 +28,125 @@ struct cryptfs {
 static void cryptfs_destructor(void *mem)
 {
     struct cryptfs *cfs = (struct cryptfs *)mem;
-    // TODO:
-    kmem_deref(cfs->key_file_data);
-    kmem_deref(cfs->data_key);
+    kmem_deref(cfs->key_filename);
+    kmem_deref(cfs->key_file);
     kmem_deref(cfs->header_key);
-    kmem_deref(cfs->header_iv);
     kmem_deref(cfs->folder);
-    kmem_deref(cfs->mount_point_path);
+    kmem_deref(cfs->mount_point_folder);
 }
 
-struct cryptfs *cryptfs_create(char *crypted_folder, char *key_file_path)
+
+
+static int fs_getattr(const char *path, struct stat *st)
+{
+    printf("call fs_getattr\n");
+    st->st_uid = getuid();
+    st->st_gid = getgid();
+    st->st_atime = time(NULL);
+    st->st_mtime = time(NULL);
+
+    if ( strcmp( path, "/" ) == 0 ) {
+        st->st_mode = S_IFDIR | 0755;
+        st->st_nlink = 2;
+    } else {
+        st->st_mode = S_IFREG | 0644;
+        st->st_nlink = 1;
+        st->st_size = 1024;
+    }
+    return 0;
+}
+
+static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+             off_t offset, struct fuse_file_info *fi)
+{
+    printf("fs_readdir\n");
+    filler(buf, ".", NULL, 0);
+    filler(buf, "..", NULL, 0);
+
+    if (strcmp(path, "/") == 0) {
+        filler(buf, "file54", NULL, 0);
+        filler(buf, "file349", NULL, 0);
+    }
+    return 0;
+}
+
+static int fs_open(const char *path, struct fuse_file_info *fi)
+{
+    printf("fs_open\n");
+    return 0;
+}
+
+/*читаем данные из открытого файла*/
+static int fs_read(const char *path, char *buf, size_t size, off_t offset,
+              struct fuse_file_info *fi)
+{
+    printf("fs_read\n");
+    return 0;
+}
+
+static int fs_write(const char *path, const char *buf, size_t size, off_t offset,
+              struct fuse_file_info *fi)
+{
+    printf("fs_write\n");
+    return size;
+}
+
+static int fs_mkdir(const char* path, mode_t mode)
+{
+    printf("fs_mkdir\n");
+    return 0;
+}
+
+static int fs_mknod(const char* path, mode_t mode, dev_t dev)
+{
+    printf("fs_mknod\n");
+    return 0;
+}
+
+static int fs_rename(const char* old, const char* new)
+{
+    printf("fs_rename\n");
+    return 0;
+}
+
+static int fs_rmdir(const char* path)
+{
+    printf("fs_rmdir\n");
+    return 0;
+}
+
+static int fs_unlink(const char* path)
+{
+    printf("fs_unlink\n");
+    return 0;
+}
+
+static struct fuse_operations fs_operations =
+{
+    .getattr    = fs_getattr,
+    .readdir    = fs_readdir,
+    .open       = fs_open,
+    .read       = fs_read,
+    .write      = fs_write,
+    .mkdir      = fs_mkdir,
+    .mknod      = fs_mknod,
+    .rename     = fs_rename,
+    .rmdir      = fs_rmdir,
+    .unlink     = fs_unlink,
+};
+
+
+struct cryptfs *cryptfs_create(char *crypted_folder, char *key_filename)
 {
     struct cryptfs *cfs;
 
     if (!dir_exist(crypted_folder)) {
-        print_e("Encrypted path is not correct\n");
+        print_e("folder %s is not exist\n", crypted_folder);
         return NULL;
     }
 
-    if (!file_exist(key_file_path)) {
-        print_e(".key file is not exist\n");
+    if (!file_exist(key_filename)) {
+        print_e("%s file is not exist\n", key_filename);
         return NULL;
     }
 
@@ -55,150 +162,131 @@ struct cryptfs *cryptfs_create(char *crypted_folder, char *key_file_path)
         return NULL;
     }
 
-    cfs->key_file_data = file_get_contents(key_file_path);
-    if (!cfs->key_file_data) {
-        print_e("Can't read key file\n");
+    cfs->key_filename = kref_strdub(key_filename);
+    if (!cfs->key_filename) {
+        print_e("Can't copy file name\n");
         return NULL;
     }
 
     return cfs;
 }
 
-static int
-uncrypt_key_file_data(struct ubuf *key_file_data, struct ubuf *keyfile_key,
-                      struct ubuf **data_key, struct ubuf **header_iv)
-{
-    // TODO:
 
-}
-
-int cryptfs_mount(struct cryptfs *cfs, char *mount_point_path, char *password)
+int cryptfs_mount(struct cryptfs *cfs, char *mount_point_folder, char *password)
 {
-    struct ubuf *keyfile_key, *pass;
+    struct buf *key;
+    struct buf *pass;
+    struct fuse_args fuse_args = FUSE_ARGS_INIT(0, NULL);
     int rc = -1;
 
     pass = buf_strdub(password);
     if (!pass)
         goto out;
 
-    keyfile_key = md5sum(pass);
-    if (!keyfile_key) {
-        print_e("Can't got md5 for keyfile_key\n");
+    key = md5sum(pass, KEY_FILE_KEY_LEN);
+    if (!key) {
+        print_e("Can't got md5 for key\n");
         return -1;
     }
-    rc = uncrypt_key_file_data(cfs->key_file_data, keyfile_key,
-                               &cfs->data_key, &cfs->header_iv);
+
+    rc = key_file_load(cfs->key_filename, key, &cfs->key_file);
     switch (rc) {
-    case -3:
-        print_e("incorrect password\n");
+    case -1:
+        print_e("Can't load and encrypt key file\n");
         goto out;
 
-    case -4: // TODO:
-        print_e("...\n");
+    case -2:
+        print_e("key file corrupt or incorrect password\n");
         goto out;
     }
 
-    cfs->header_key = md5sum(keyfile_key);
+    cfs->header_key = md5sum(key, HEADER_FILE_KEY_LEN);
     if (!cfs->header_key) {
         print_e("Can't got md5 for header_key\n");
         goto out;
     }
 
-    // TODO:
+    cfs->mount_point_folder = kref_strdub(mount_point_folder);
+    if (!cfs->mount_point_folder) {
+        print_e("Can't copy crypted_folder\n");
+        goto out;
+    }
+
+    cfs->fc = fuse_mount(mount_point_folder, &fuse_args);
+    if (!cfs->fc) {
+        printf("fuse_mount error\n");
+        goto out;
+    }
+
+    cfs->fuse = fuse_new(cfs->fc, &fuse_args, &fs_operations,
+                         sizeof fs_operations, cfs);
+    if (!cfs->fuse) {
+        printf("fuse_new error\n");
+        goto out;
+    }
 
     rc = 0;
 out:
     buf_deref(pass);
-    kmem_deref(keyfile_key);
+    buf_deref(key);
     return rc;
 }
 
 int cryptfs_ummount(struct cryptfs *cfs)
 {
+    fuse_unmount(cfs->mount_point_folder, cfs->fc);
+    kmem_deref(cfs->key_file);
+    buf_deref(cfs->header_key);
+    buf_deref(cfs->mount_point_folder);
     return 0;
 }
 
 void cryptfs_loop(struct cryptfs *cfs)
 {
-
+    fuse_loop(cfs->fuse);
 }
 
-int cryptfs_generate_key_file(char *password, char *key_file_path)
+int cryptfs_generate_key_file(char *password, char *filename)
 {
-    struct ubuf *data_key, *header_iv, *data_iv;
-    struct ubuf *keyfile_key, *encrypt_key_file_data, *tag;
-    struct ubuf *pass;
-    struct ubuf *key_file_uncrypt_buf, *key_file_data;
-    struct key_file_uncrypt *key_file_uncrypt_data;
+    struct buf *key;
+    struct buf *pass;
+    struct key_file key_file;
     int rc = -1;
 
-    data_key = gen_rand_buf(64);
-    if (!data_key) {
+    key_file.data_key = make_rand_buf(DATA_FILE_KEY_LEN);
+    if (!key_file.data_key) {
         print_e("Can't generate new data key\n");
         goto out;
     }
 
-    header_iv = gen_rand_buf(12);
-    if (!header_iv) {
+    key_file.header_iv = make_rand_buf(HEADER_FILE_IV_LEN);
+    if (!key_file.header_iv) {
         print_e("Can't generate new header IV\n");
         goto out;
     }
-
-    key_file_uncrypt_buf = buf_alloc(sizeof (struct key_file_uncrypt));
-    if (!key_file_uncrypt_buf)
-        goto out;
-    key_file_uncrypt_data = (struct key_file_uncrypt *)
-                            key_file_uncrypt_buf->data;
-    memcpy(key_file_uncrypt_data->data_key, data_key->data,
-           sizeof key_file_uncrypt_data->data_key);
-    memcpy(key_file_uncrypt_data->header_iv, header_iv->data,
-           sizeof key_file_uncrypt_data->header_iv);
 
     pass = buf_strdub(password);
     if (!pass)
         goto out;
 
-    keyfile_key = md5sum(pass);
-    buf_deref(pass);
-    if (!keyfile_key) {
-        print_e("Can't got md5 for keyfile_key\n");
+    key = md5sum(pass, KEY_FILE_KEY_LEN);
+    if (!key) {
+        print_e("Can't got md5 for key\n");
         goto out;
     }
 
-    data_iv = bufz_alloc(12);
-    if (!data_iv)
+    rc = key_file_save(&key_file, filename, key);
+    if (rc) {
+        print_e("Can't generate key file\n");
         goto out;
-    rc = aes256gcm_encrypt(key_file_uncrypt_buf,
-                           &encrypt_key_file_data, &tag,
-                           data_iv, keyfile_key);
-    if (rc) {
-        print_e("Can't encrypt key file data\n");
-        return -1;
-    }
-
-    key_file_data = buf_concatenate(tag, encrypt_key_file_data);
-    if (!key_file_data) {
-        print_e("Can't alloc for key_file_data\n");
-        return -1;
-    }
-
-    rc = file_put_contents(key_file_path, key_file_data);
-    if (rc) {
-        print_e("Can't write key file: %s\n", key_file_path);
-        return -1;
     }
 
     rc = 0;
 out:
-    buf_deref(data_key);
-    buf_deref(header_iv);
-    buf_deref(data_iv);
-    buf_deref(keyfile_key);
-    buf_deref(encrypt_key_file_data);
-    buf_deref(tag);
+    buf_deref(key);
     buf_deref(pass);
-    buf_deref(key_file_data);
-    buf_deref(key_file_uncrypt_buf);
+    buf_deref(key_file.data_key);
+    buf_deref(key_file.header_iv);
     return rc;
 }
 
