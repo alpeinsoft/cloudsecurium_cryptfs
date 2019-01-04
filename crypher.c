@@ -218,3 +218,80 @@ struct buf *make_rand_buf(uint len)
     return buf;
 }
 
+struct buf *encrypt_file_name(char *name, struct buf *key)
+{
+
+}
+
+char *encrypt_path(char *uncrypt_path, struct buf *key)
+{
+    uint len = strlen(uncrypt_path);
+    int i;
+    char *p;
+    uint slashes_cnt = 0;
+    uint max_len = 0;
+    uint len_cnt = 0;
+    uint max_crypt_path_len;
+    uint max_crypt_name;
+    char *crypt_path, *name;
+    struct buf *crypt_name;
+    uint dest_cnt;
+    uint name_cnt;
+
+    /* calculate max part name and slashes numbers */
+    for (i = 0; i < len; i++) {
+        p = uncrypt_path + i;
+        if (*p == '/') {
+            slashes_cnt ++;
+            len_cnt = 0;
+            continue;
+        }
+        len_cnt ++;
+        if (len_cnt > max_len)
+            max_len = len_cnt;
+    }
+    /* calculate maximum crypt_path length and allocate it */
+    max_crypt_name = ceil(max_len / 16);
+    max_crypt_path_len = max_crypt_name * slashes_cnt;
+    crypt_path = kzref_alloc(max_crypt_path_len, NULL);
+    if (!crypt_path) {
+        print_e("can't alloc for crypt_path\n");
+        goto out;
+    }
+    name = kzref_alloc(max_crypt_name, NULL);
+    if (!name) {
+        print_e("can't alloc for name\n");
+        goto out;
+    }
+
+    dest_cnt = 0;
+    p = name;
+    for (i = 0; i < len; i++) {
+        dest_cnt ++;
+        if (uncrypt_path[i] != '/') {
+            *p = uncrypt_path[i];
+            p++;
+            continue;
+        }
+
+        *p = 0;
+        crypt_path[dest_cnt - 1] = uncrypt_path[i];
+        crypt_name = encrypt_file_name(name, key);
+        if (!crypt_name) {
+            print_e("can't crypt file name\n");
+            goto out;
+        }
+        memcpy(crypt_path + dest_cnt, crypt_name->data, crypt_name->len);
+        kmem_deref(crypt_name);
+        dest_cnt += crypt_name->len;
+        p = name;
+    }
+
+    kmem_ref(crypt_path);
+out:
+    kmem_deref(crypt_path);
+    kmem_deref(name);
+    buf_deref(crypt_name);
+    return crypt_path;
+}
+
