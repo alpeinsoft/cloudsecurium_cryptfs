@@ -12,25 +12,13 @@
 #include "cryptfs.h"
 #include "buf.h"
 
-struct cryptfs {
-    char *key_filename;
-
-    struct key_file *key_file;
-    struct buf *header_key;
-
-    char *folder;
-    char *mount_point_folder;
-    struct fuse_chan *fc;
-    struct fuse *fuse;
-};
-
-
 static void cryptfs_destructor(void *mem)
 {
     struct cryptfs *cfs = (struct cryptfs *)mem;
     kmem_deref(cfs->key_filename);
     kmem_deref(cfs->key_file);
     kmem_deref(cfs->header_key);
+    buf_deref(cfs->file_name_key);
     kmem_deref(cfs->folder);
     kmem_deref(cfs->mount_point_folder);
 }
@@ -39,7 +27,11 @@ static void cryptfs_destructor(void *mem)
 
 static int fs_getattr(const char *path, struct stat *st)
 {
-    printf("call fs_getattr\n");
+    struct cryptfs *cfs = (struct cryptfs *)
+                           fuse_get_context()->private_data;
+    printf("call fs_getattr %s\n", path);
+
+
     st->st_uid = getuid();
     st->st_gid = getgid();
     st->st_atime = time(NULL);
@@ -72,8 +64,24 @@ static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
 static int fs_open(const char *path, struct fuse_file_info *fi)
 {
-    printf("fs_open\n");
-    return 0;
+    printf("fs_open path = %s\n", path);
+    int f;
+    int rc = 0;
+    char *crypt_path = crypt_path(path);
+    if (!crypt_path) {
+        print_e("can't got crypt_path\n");
+        goto out;
+    }
+    f = open(crypt_path, fi->flags);
+    if (f < 0) {
+        print_e("can't open %s\n", crypt_path);
+        goto out;
+    }
+
+    rc = 0;
+out:
+    kmem_deref(crypt_path);
+    return rc;
 }
 
 /*читаем данные из открытого файла*/
@@ -142,33 +150,35 @@ struct cryptfs *cryptfs_create(char *crypted_folder, char *key_filename)
 
     if (!dir_exist(crypted_folder)) {
         print_e("folder %s is not exist\n", crypted_folder);
-        return NULL;
+        goto out;
     }
 
     if (!file_exist(key_filename)) {
         print_e("%s file is not exist\n", key_filename);
-        return NULL;
+        goto out;
     }
 
     cfs = kzref_alloc(sizeof(struct cryptfs), cryptfs_destructor);
     if (!cfs) {
         print_e("alloc cryptfs error\n");
-        return NULL;
+        goto out;
     }
 
     cfs->folder = kref_strdub(crypted_folder);
     if (!cfs->folder) {
         print_e("Can't copy crypted_folder\n");
-        return NULL;
+        goto out;
     }
 
     cfs->key_filename = kref_strdub(key_filename);
     if (!cfs->key_filename) {
         print_e("Can't copy file name\n");
-        return NULL;
+        goto out;
     }
-
     return cfs;
+out:
+    kmem_deref(cfs);
+    return NULL;
 }
 
 
@@ -206,11 +216,19 @@ int cryptfs_mount(struct cryptfs *cfs, char *mount_point_folder, char *password)
         goto out;
     }
 
+    cfs->file_name_key = md5sum(cfs->header_key, 16);
+    if (!cfs->file_name_key) {
+        print_e("Can't got md5 for file_name_key\n");
+        goto out;
+    }
+
     cfs->mount_point_folder = kref_strdub(mount_point_folder);
     if (!cfs->mount_point_folder) {
         print_e("Can't copy crypted_folder\n");
         goto out;
     }
+
+    fuse_unmount(mount_point_folder, NULL);
 
     cfs->fc = fuse_mount(mount_point_folder, &fuse_args);
     if (!cfs->fc) {
@@ -237,6 +255,7 @@ int cryptfs_ummount(struct cryptfs *cfs)
     fuse_unmount(cfs->mount_point_folder, cfs->fc);
     kmem_deref(cfs->key_file);
     buf_deref(cfs->header_key);
+    buf_deref(cfs->file_name_key);
     buf_deref(cfs->mount_point_folder);
     return 0;
 }
