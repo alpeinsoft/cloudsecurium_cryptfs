@@ -6,10 +6,10 @@
 
 /** Linked-list element */
 struct le {
-	struct le *prev;    /**< Previous element                    */
-	struct le *next;    /**< Next element                        */
-	struct list *list;  /**< Parent list (NULL if not linked-in) */
-	void *data;         /**< User-data                           */
+    struct le *prev;    /**< Previous element                    */
+    struct le *next;    /**< Next element                        */
+    struct list *list;  /**< Parent list (NULL if not linked-in) */
+    void *data;         /**< User-data                           */
 };
 
 /** List Element Initializer */
@@ -18,8 +18,8 @@ struct le {
 
 /** Defines a linked list */
 struct list {
-	struct le *head;  /**< First list element */
-	struct le *tail;  /**< Last list element  */
+    struct le *head;  /**< First list element */
+    struct le *tail;  /**< Last list element  */
 };
 
 /** Linked list Initializer */
@@ -45,23 +45,23 @@ int list_count(const struct list *list);
  */
 static inline void *list_ledata(const struct le *le)
 {
-	return le ? le->data : NULL;
+    return le ? le->data : NULL;
 }
 
 
 static inline bool list_isempty(const struct list *list)
 {
-	return list ? list->head == NULL : TRUE;
+    return list ? list->head == NULL : TRUE;
 }
 
 static inline struct le *le_next(struct le *le)
 {
-	return le ? le->next : NULL;
+    return le ? le->next : NULL;
 }
 
 
 #define LIST_FOREACH(list, le) \
-	for ((le) = list_head((list)); (le); (le) = (le)->next)
+    for ((le) = list_head((list)); (le); (le) = (le)->next)
 
 #define LIST_FOREACH_SAFE(list, le, next_le) \
     for ((le) = list_head((list)), (next_le) = le_next(le); (le); (le) = (next_le), (next_le) = le_next(next_le))

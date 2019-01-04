@@ -34,10 +34,12 @@ void *kref_concatenate_mem(void *mem1, void *mem2);
  */
 static inline void *kref_alloc(uint size, void (*destructor)(void *mem))
 {
-	void *mem = kref_alloc_aligned(size, 0, destructor);
-	if (!mem)
-		print_e("%s +%d: Can't alloc memory\n", __FILE__, __LINE__);
-	return mem;
+    void *mem = kref_alloc_aligned(size, 0, destructor);
+    if (!mem) {
+        print_e("%s +%d: Can't alloc memory\n", __FILE__, __LINE__);
+        print_backtrace();
+    }
+    return mem;
 }
 
 
@@ -49,12 +51,12 @@ static inline void *kref_alloc(uint size, void (*destructor)(void *mem))
  */
 static inline void *kzref_alloc(uint size, void (*destructor)(void *mem))
 {
-	void *mem = kref_alloc(size, destructor);
-	if (!mem)
-		return NULL;
+    void *mem = kref_alloc(size, destructor);
+    if (!mem)
+        return NULL;
 
-	memset(mem, 0, size);
-	return mem;
+    memset(mem, 0, size);
+    return mem;
 }
 
 

@@ -1,4 +1,5 @@
 #include <stdarg.h>
+#include <execinfo.h>
 #include "types.h"
 #include "buf.h"
 #include "list.h"
@@ -6,13 +7,20 @@
 #ifndef COMMON_H_
 #define COMMON_H_
 
-static inline void print_e(const char *format, ...)
+#define print_e(format, ...) \
+    fprintf(stderr, "%s +%d: ", __FILE__, __LINE__); \
+    fprintf(stderr, (format), ##__VA_ARGS__)
+
+
+static inline void print_backtrace()
 {
-    va_list args;
-    va_start(args, format);
-    fprintf(stderr, "%s +%d: ", __FILE__, __LINE__);
-    fprintf(stderr, format, args);
-    va_end(args);
+    void* callstack[128];
+    int i, frames = backtrace(callstack, 128);
+    char** strs = backtrace_symbols(callstack, frames);
+    for (i = 0; i < frames; ++i) {
+        printf("%s\n", strs[i]);
+    }
+    free(strs);
 }
 
 

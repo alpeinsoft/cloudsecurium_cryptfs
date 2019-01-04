@@ -9,3 +9,4 @@ int crypher_aes256gcm_decrypt(struct buf *src, struct buf **dst,
 							  struct buf *tag, struct buf *iv,
 							  struct buf *key);
 struct buf *md5sum(struct buf *src);
+struct buf *make_rand_buf(uint len);

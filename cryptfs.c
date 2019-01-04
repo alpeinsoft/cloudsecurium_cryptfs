@@ -4,7 +4,7 @@
 #include "common.h"
 
 struct cryptfs {
-	struct ubuf *key_file_data;
+    struct ubuf *key_file_data;
 
     struct ubuf *data_key;
     struct ubuf *header_key;
@@ -18,7 +18,7 @@ struct cryptfs {
 
 struct key_file_uncrypt {
     u8 data_key[64];
-    u8 header_iv[16];
+    u8 header_iv[12];
 };
 
 static void cryptfs_destructor(void *mem)
@@ -70,7 +70,7 @@ struct cryptfs *cryptfs_create(char *crypted_folder, char *key_file_path)
 
 static int
 uncrypt_key_file_data(struct ubuf *key_file_data, struct ubuf *keyfile_key,
-		              struct ubuf **data_key, struct ubuf **header_iv)
+                      struct ubuf **data_key, struct ubuf **header_iv)
 {
     // TODO:
 
@@ -83,7 +83,7 @@ int cryptfs_mount(struct cryptfs *cfs, char *mount_point_path, char *password)
 
     pass = buf_strdub(password);
     if (!pass)
-		goto out;
+        goto out;
 
     keyfile_key = md5sum(pass);
     if (!keyfile_key) {
@@ -112,7 +112,7 @@ int cryptfs_mount(struct cryptfs *cfs, char *mount_point_path, char *password)
 
     rc = 0;
 out:
-	buf_deref(pass);
+    buf_deref(pass);
     kmem_deref(keyfile_key);
     return rc;
 }
@@ -127,32 +127,9 @@ void cryptfs_loop(struct cryptfs *cfs)
 
 }
 
-
-
-struct ubuf *gen_rand_buf(uint len)
-{
-    static bool first = 1;
-    struct ubuf *buf;
-    uint i;
-
-    if (first) {
-        srand ((uint) time(NULL));
-        first = 0;
-    }
-
-    buf = buf_alloc(len);
-    if (!buf)
-        return NULL;
-    for (i = 0; i < len; i++)
-        buf->data[i] = rand();
-    return buf;
-}
-
-
-
 int cryptfs_generate_key_file(char *password, char *key_file_path)
 {
-	struct ubuf *data_key, *header_iv, *data_iv;
+    struct ubuf *data_key, *header_iv, *data_iv;
     struct ubuf *keyfile_key, *encrypt_key_file_data, *tag;
     struct ubuf *pass;
     struct ubuf *key_file_uncrypt_buf, *key_file_data;
@@ -165,7 +142,7 @@ int cryptfs_generate_key_file(char *password, char *key_file_path)
         goto out;
     }
 
-    header_iv = gen_rand_buf(16);
+    header_iv = gen_rand_buf(12);
     if (!header_iv) {
         print_e("Can't generate new header IV\n");
         goto out;
@@ -173,9 +150,9 @@ int cryptfs_generate_key_file(char *password, char *key_file_path)
 
     key_file_uncrypt_buf = buf_alloc(sizeof (struct key_file_uncrypt));
     if (!key_file_uncrypt_buf)
-    	goto out;
+        goto out;
     key_file_uncrypt_data = (struct key_file_uncrypt *)
-    		                key_file_uncrypt_buf->data;
+                            key_file_uncrypt_buf->data;
     memcpy(key_file_uncrypt_data->data_key, data_key->data,
            sizeof key_file_uncrypt_data->data_key);
     memcpy(key_file_uncrypt_data->header_iv, header_iv->data,
@@ -183,7 +160,7 @@ int cryptfs_generate_key_file(char *password, char *key_file_path)
 
     pass = buf_strdub(password);
     if (!pass)
-    	goto out;
+        goto out;
 
     keyfile_key = md5sum(pass);
     buf_deref(pass);
@@ -192,11 +169,11 @@ int cryptfs_generate_key_file(char *password, char *key_file_path)
         goto out;
     }
 
-    data_iv = bufz_alloc(16);
+    data_iv = bufz_alloc(12);
     if (!data_iv)
-		goto out;
+        goto out;
     rc = aes256gcm_encrypt(key_file_uncrypt_buf,
-    		               &encrypt_key_file_data, &tag,
+                           &encrypt_key_file_data, &tag,
                            data_iv, keyfile_key);
     if (rc) {
         print_e("Can't encrypt key file data\n");
@@ -217,15 +194,15 @@ int cryptfs_generate_key_file(char *password, char *key_file_path)
 
     rc = 0;
 out:
-	buf_deref(data_key);
-	buf_deref(header_iv);
-	buf_deref(data_iv);
-	buf_deref(keyfile_key);
-	buf_deref(encrypt_key_file_data);
-	buf_deref(tag);
-	buf_deref(pass);
-	buf_deref(key_file_data);
-	buf_deref(key_file_uncrypt_buf);
+    buf_deref(data_key);
+    buf_deref(header_iv);
+    buf_deref(data_iv);
+    buf_deref(keyfile_key);
+    buf_deref(encrypt_key_file_data);
+    buf_deref(tag);
+    buf_deref(pass);
+    buf_deref(key_file_data);
+    buf_deref(key_file_uncrypt_buf);
     return rc;
 }
 
