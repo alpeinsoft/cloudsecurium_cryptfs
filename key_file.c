@@ -10,8 +10,8 @@ static char key_file_iv[KEY_FILE_IV_LEN] = "123456789012";
 static void key_file_destructor(void *mem)
 {
     struct key_file *key_file = (struct key_file *)mem;
-    buf_deref(key_file->data_key);
-    buf_deref(key_file->header_iv);
+    buf_deref(&key_file->data_key);
+    buf_deref(&key_file->header_iv);
 }
 
 struct key_file_uncrypt_format {
@@ -78,12 +78,12 @@ int key_file_load(char *filename, struct buf *key,
     *new_key_file = kmem_ref(key_file);
     rc = 0;
 out:
-    kmem_deref(key_file);
-    buf_deref(file_data);
-    buf_deref(tag);
-    buf_deref(encrypt_file_data);
-    buf_deref(uncrypt_buf);
-    buf_deref(iv_buf);
+    kmem_deref(&key_file);
+    buf_deref(&file_data);
+    buf_deref(&tag);
+    buf_deref(&encrypt_file_data);
+    buf_deref(&uncrypt_buf);
+    buf_deref(&iv_buf);
     return rc;
 }
 
@@ -132,10 +132,10 @@ int key_file_save(struct key_file *key_file,
 
     rc = 0;
 out:
-    buf_deref(encrypt_file_data);
-    buf_deref(iv_buf);
-    buf_deref(tag);
-    buf_deref(uncrypt_buf);
-    buf_deref(file_data);
+    buf_deref(&encrypt_file_data);
+    buf_deref(&iv_buf);
+    buf_deref(&tag);
+    buf_deref(&uncrypt_buf);
+    buf_deref(&file_data);
     return rc;
 }

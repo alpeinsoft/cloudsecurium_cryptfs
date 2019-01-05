@@ -15,12 +15,12 @@
 static void cryptfs_destructor(void *mem)
 {
     struct cryptfs *cfs = (struct cryptfs *)mem;
-    kmem_deref(cfs->key_filename);
-    kmem_deref(cfs->key_file);
-    kmem_deref(cfs->header_key);
-    buf_deref(cfs->file_name_key);
-    kmem_deref(cfs->folder);
-    kmem_deref(cfs->mount_point_folder);
+    kmem_deref(&cfs->key_filename);
+    kmem_deref(&cfs->key_file);
+    kmem_deref(&cfs->header_key);
+    buf_deref(&cfs->file_name_key);
+    kmem_deref(&cfs->folder);
+    kmem_deref(&cfs->mount_point_folder);
 }
 
 
@@ -65,7 +65,7 @@ static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 static int fs_open(const char *path, struct fuse_file_info *fi)
 {
     printf("fs_open path = %s\n", path);
-    int f;
+/*    int f;
     int rc = 0;
     char *crypt_path = crypt_path(path);
     if (!crypt_path) {
@@ -80,8 +80,8 @@ static int fs_open(const char *path, struct fuse_file_info *fi)
 
     rc = 0;
 out:
-    kmem_deref(crypt_path);
-    return rc;
+    kmem_deref(&crypt_path);*/
+    return 0;
 }
 
 /*читаем данные из открытого файла*/
@@ -177,7 +177,7 @@ struct cryptfs *cryptfs_create(char *crypted_folder, char *key_filename)
     }
     return cfs;
 out:
-    kmem_deref(cfs);
+    kmem_deref(&cfs);
     return NULL;
 }
 
@@ -245,18 +245,18 @@ int cryptfs_mount(struct cryptfs *cfs, char *mount_point_folder, char *password)
 
     rc = 0;
 out:
-    buf_deref(pass);
-    buf_deref(key);
+    buf_deref(&pass);
+    buf_deref(&key);
     return rc;
 }
 
 int cryptfs_ummount(struct cryptfs *cfs)
 {
     fuse_unmount(cfs->mount_point_folder, cfs->fc);
-    kmem_deref(cfs->key_file);
-    buf_deref(cfs->header_key);
-    buf_deref(cfs->file_name_key);
-    buf_deref(cfs->mount_point_folder);
+    kmem_deref(&cfs->key_file);
+    buf_deref(&cfs->header_key);
+    buf_deref(&cfs->file_name_key);
+    buf_deref(&cfs->mount_point_folder);
     return 0;
 }
 
@@ -302,10 +302,10 @@ int cryptfs_generate_key_file(char *password, char *filename)
 
     rc = 0;
 out:
-    buf_deref(key);
-    buf_deref(pass);
-    buf_deref(key_file.data_key);
-    buf_deref(key_file.header_iv);
+    buf_deref(&key);
+    buf_deref(&pass);
+    buf_deref(&key_file.data_key);
+    buf_deref(&key_file.header_iv);
     return rc;
 }
 
