@@ -62,7 +62,7 @@ struct buf *file_get_contents(char *filename)
 
 err:
     fclose(fp);
-    kmem_deref(buf);
+    kmem_deref(&buf);
     return NULL;
 }
 
@@ -96,4 +96,55 @@ int file_put_contents(char *filename, struct buf *buf)
     return 0;
 }
 
+struct list *str_split(char *path, char sep)
+{
+    uint len = strlen(path);
+    uint part_len = 0;
+    struct list *list;
+    struct buf *part_buf;
+    int i;
 
+    list = list_create();
+    if (!list) {
+        print_e("Can't alloc new list\n");
+        goto err;
+    }
+
+    char *part = path;
+    for (i = 0; i < len; i++) {
+        char *p = path + i;
+        if (*p != sep) {
+            part_len ++;
+            continue;
+        }
+
+        if (!part_len) {
+            part_len = 0;
+            part = p + 1;
+            continue;
+        }
+
+        part_buf = buf_cpy(part, part_len);
+        if (!part_buf) {
+            print_e("Can't alloc for path\n");
+            goto err;
+        }
+        buf_list_append(list, part_buf);
+        part_len = 0;
+        part = p + 1;
+    }
+
+    if (part_len) {
+        part_buf = buf_cpy(part, part_len);
+        if (!part_buf) {
+            print_e("Can't alloc for path\n");
+            goto err;
+        }
+        buf_list_append(list, part_buf);
+    }
+
+    kmem_ref(list);
+err:
+    kmem_deref(&list);
+    return list;
+}
