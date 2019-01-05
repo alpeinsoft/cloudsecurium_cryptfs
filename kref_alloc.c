@@ -1,14 +1,3 @@
-/*
- * kref_alloc.c - memory allocate wrapper on malloc() with reference
- * counters and destructor.
- *
- * Copyright (C) 2015 Michail Kurochkin <stelhs@ya.ru>
- * Copyright (C) 2015 Promwad Corp.
- *
- * This file is released under the GPLv2.
- *
- */
-
 #include "types.h"
 #include "list.h"
 #include "kref.h"
@@ -231,15 +220,20 @@ int kmem_get_ref_count(void *mem)
  * @param mem: pointer to memory allocated
  *         with kref_alloc() memory pointer
  */
-void *kmem_deref(void *mem)
+void *_kmem_deref(void **mem)
 {
     struct kralloc *a;
     int rc;
-
+    void *m;
     if (!mem)
         return NULL;
 
-    a = (struct kralloc *)mem - 1;
+    m = *mem;
+
+    if (!m)
+        return NULL;
+
+    a = (struct kralloc *)m - 1;
 
     if(strcmp(a->magic, "kralloc") != 0)
         return NULL;
@@ -249,10 +243,12 @@ void *kmem_deref(void *mem)
     else
         rc = kref_put(&a->kref, k_destructor);
 
-    if (rc)
+    if (rc) {
+        *mem = NULL;
         return NULL;
+    }
 
-    return mem;
+    return m;
 }
 
 /**

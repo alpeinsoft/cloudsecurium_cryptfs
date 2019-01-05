@@ -1,14 +1,3 @@
-/*
- * kref_alloc.h - memory allocate wrapper on kmalloc() with reference
- * counters and destructor.
- *
- * Copyright (C) 2015 Michail Kurochkin <stelhs@ya.ru>
- * Copyright (C) 2015 Promwad Corp.
- *
- * This file is released under the GPLv2.
- *
- */
-
 #include <malloc.h>
 #include <string.h>
 #include "common.h"
@@ -19,7 +8,10 @@
 void *kref_alloc_aligned(int size, uint align, void (*destructor)(void *mem));
 void *kmem_ref(void *mem);
 int kmem_link_to_kmem(void *mem_new, void *mem_parent);
-void *kmem_deref(void *mem);
+
+void *_kmem_deref(void **mem);
+#define kmem_deref(mem) _kmem_deref((void *)(mem))
+
 char *kref_sprintf(const char *fmt, ...);
 char *kref_strdub(char *src);
 int kmem_get_ref_count(void *mem);
