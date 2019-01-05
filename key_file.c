@@ -105,6 +105,7 @@ int key_file_save(struct key_file *key_file,
            sizeof uncrypt_format->data_key);
     memcpy(uncrypt_format->header_iv, key_file->header_iv->data,
            sizeof uncrypt_format->header_iv);
+    printf("2\n");
 
     iv_buf = buf_cpy(key_file_iv, KEY_FILE_IV_LEN);
     if (!iv_buf)

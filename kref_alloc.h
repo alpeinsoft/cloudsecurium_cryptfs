@@ -13,7 +13,7 @@ void *_kmem_deref(void **mem);
 #define kmem_deref(mem) _kmem_deref((void *)(mem))
 
 char *kref_sprintf(const char *fmt, ...);
-char *kref_strdub(char *src);
+char *kref_strdub(const char *src);
 int kmem_get_ref_count(void *mem);
 uint kmem_size(void *mem);
 void *kref_concatenate_mem(void *mem1, void *mem2);

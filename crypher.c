@@ -338,6 +338,59 @@ static uint get_aligned_file_name_len(uint name_len)
     return (name_len / align + 1) * align;
 }
 
+char *decrypt_file_name(char *name, struct buf *key)
+{
+    struct buf *name_buf;
+    struct buf *hash;
+    struct buf *decode_base32_name;
+    struct buf *decrypted;
+    uint len_aligned;
+    int i;
+
+    if (!name || !key) {
+        print_e("incorrect args for decrypt_file_name\n");
+        return NULL;
+    }
+
+    name_buf = buf_strdub(name);
+    if (!name_buf) {
+        print_e("Can't alloc name_buf\n");
+        goto out;
+    }
+
+    decode_base32_name = base32_decode_buf(name_buf);
+    if (!decode_base32_name) {
+        print_e("Can't decode decode_base32_name\n");
+        goto out;
+    }
+
+    len_aligned = decode_base32_name->len;
+
+    decrypted = buf_alloc(len_aligned);
+    if (!decrypted) {
+        print_e("Can't alloc decrypted\n");
+        goto out;
+    }
+
+    hash = md5sum(key, len_aligned);
+    if (!hash) {
+        print_e("Can't get md5 for file name\n");
+        goto out;
+    }
+
+    /* XOR file name with hash2 */
+    for (i = 0; i < decode_base32_name->len; i++)
+        decrypted->data[i] = decode_base32_name->data[i] ^ hash->data[i];
+
+    buf_ref(decrypted);
+out:
+    buf_deref(&name_buf);
+    buf_deref(&hash);
+    buf_deref(&decode_base32_name);
+    buf_deref(&decrypted);
+    return buf_to_str(decrypted);
+}
+
 struct buf *encrypt_file_name(char *name, struct buf *key)
 {
     struct buf *hash;
@@ -392,7 +445,9 @@ err:
 }
 
 
-struct buf *encrypt_path(char *uncrypt_path, struct buf *key)
+char *encrypt_path(const char *uncrypt_path,
+                   struct buf *key,
+                   char *path_prefix)
 {
     struct buf *crypt_path;
     struct list *parts;
@@ -400,6 +455,7 @@ struct buf *encrypt_path(char *uncrypt_path, struct buf *key)
     uint crypt_path_len;
     struct le *le;
     char *p;
+    uint path_prefix_len = strlen(path_prefix);
 
     parts = str_split(uncrypt_path, '/');
     if (!parts) {
@@ -413,7 +469,7 @@ struct buf *encrypt_path(char *uncrypt_path, struct buf *key)
         goto err;
     }
 
-    crypt_path_len = 1;
+    crypt_path_len = path_prefix_len;
     LIST_FOREACH(parts, le) {
         struct buf *part = list_ledata(le);
         struct buf *crypted_part;
@@ -431,21 +487,25 @@ struct buf *encrypt_path(char *uncrypt_path, struct buf *key)
         print_e("can't alloc for crypt_path_len\n");
         goto err;
     }
-    crypt_path->data[0] = '/';
 
     p = crypt_path->data;
+    memcpy(p, path_prefix, path_prefix_len);
+    p += path_prefix_len;
+    if (path_prefix[path_prefix_len - 1] == '/')
+        p--;
+
     LIST_FOREACH(crypted_parts, le) {
         struct buf *crypted_part = list_ledata(le);
         *p++ = '/';
         memcpy(p, crypted_part->data, crypted_part->len - 1);
         p += crypted_part->len - 1;
     }
-
-    crypt_path->len = strlen(crypt_path->data) + 1;
+    *p = 0;
+    crypt_path->len = strlen(crypt_path->data);
     buf_ref(crypt_path);
 err:
     buf_deref(&crypt_path);
     kmem_deref(&parts);
     kmem_deref(&crypted_parts);
-    return crypt_path;
+    return buf_to_str(crypt_path);
 }

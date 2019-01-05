@@ -1,8 +1,9 @@
 #ifndef _CRYPTFS_H
 #define _CRYPTFS_H
 
+
 struct cryptfs {
-    char *key_filename;
+    char *keys_file_name;
 
     struct key_file *key_file;
     struct buf *header_key;
@@ -12,6 +13,8 @@ struct cryptfs {
     char *mount_point_folder;
     struct fuse_chan *fc;
     struct fuse *fuse;
+
+    struct list *opened_files;
 };
 
 
@@ -20,7 +23,7 @@ struct cryptfs {
 #define KEY_FILE_KEY_LEN 32
 #define DATA_FILE_KEY_LEN 64
 
-struct cryptfs *cryptfs_create(char *crypted_folder, char *key_filename);
+struct cryptfs *cryptfs_create(char *crypted_folder, char *keys_file_name);
 int cryptfs_mount(struct cryptfs *cryptfs, char *mount_point_path, char *password);
 int cryptfs_ummount(struct cryptfs *cryptfs);
 void cryptfs_loop(struct cryptfs *cryptfs);

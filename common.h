@@ -8,7 +8,7 @@
 #define COMMON_H_
 
 #define print_e(format, ...) { \
-    fprintf(stderr, "%s +%d, %s: ", __FILE__, __LINE__, __FUNCTION__); \
+    fprintf(stderr, "%s +%d, %s(): ", __FILE__, __LINE__, __FUNCTION__); \
     fprintf(stderr, (format), ##__VA_ARGS__); \
 }
 
@@ -29,6 +29,6 @@ int dir_exist(char *path);
 int file_exist(char *path);
 struct buf *file_get_contents(char *filename);
 int file_put_contents(char *filename, struct buf *buf);
-struct list *str_split(char *path, char sep);
+struct list *str_split(const char *path, char sep);
 
 #endif /* COMMON_H_ */

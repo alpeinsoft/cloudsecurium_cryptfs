@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <fuse.h>
 #include <unistd.h>
+#include <dirent.h>
 #include "kref_alloc.h"
 #include "key_file.h"
 #include "crypher.h"
@@ -15,125 +16,516 @@
 static void cryptfs_destructor(void *mem)
 {
     struct cryptfs *cfs = (struct cryptfs *)mem;
-    kmem_deref(&cfs->key_filename);
+    kmem_deref(&cfs->keys_file_name);
     kmem_deref(&cfs->key_file);
     kmem_deref(&cfs->header_key);
     buf_deref(&cfs->file_name_key);
     kmem_deref(&cfs->folder);
     kmem_deref(&cfs->mount_point_folder);
+    kmem_deref(&cfs->opened_files);
 }
 
+struct opened_file {
+    struct le le;
+    int fd;
+    char *file_path;
+    char *encrypted_path;
+    int flags;
+};
+
+void opened_file_destructor(void *mem)
+{
+    struct opened_file *of = (struct opened_file *)mem;
+    close(of->fd);
+    list_unlink(&of->le);
+    kmem_deref(&of->file_path);
+    kmem_deref(&of->encrypted_path);
+}
 
 
 static int fs_getattr(const char *path, struct stat *st)
 {
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
-    printf("call fs_getattr %s\n", path);
-
-
-    st->st_uid = getuid();
-    st->st_gid = getgid();
-    st->st_atime = time(NULL);
-    st->st_mtime = time(NULL);
-
-    if ( strcmp( path, "/" ) == 0 ) {
-        st->st_mode = S_IFDIR | 0755;
-        st->st_nlink = 2;
-    } else {
-        st->st_mode = S_IFREG | 0644;
-        st->st_nlink = 1;
-        st->st_size = 1024;
+    char *encrypted_path;
+    struct stat cs;
+    int rc = -1;
+    printf("call fs_getattr '%s'\n", path);
+    encrypted_path = encrypt_path(path,
+                                  cfs->file_name_key,
+                                  cfs->folder);
+    if (!encrypted_path) {
+        print_e("Can't encrypt path %s\n", path);
+        goto out;
     }
-    return 0;
+
+    rc = stat(encrypted_path, &cs);
+    if (rc) {
+        rc = -ENOENT;
+//        print_e("Can't stat %s\n", encrypted_path);
+        goto out;
+    }
+
+    st->st_uid = cs.st_uid;
+    st->st_gid = cs.st_gid;
+    st->st_atime = cs.st_atime;
+    st->st_mtime = cs.st_mtime;
+    st->st_mode = cs.st_mode;
+    st->st_nlink = cs.st_nlink;
+    st->st_size = cs.st_size;
+
+    rc = 0;
+out:
+    kmem_deref(&encrypted_path);
+    return rc;
 }
+
 
 static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
              off_t offset, struct fuse_file_info *fi)
 {
-    printf("fs_readdir\n");
-    filler(buf, ".", NULL, 0);
-    filler(buf, "..", NULL, 0);
+    struct cryptfs *cfs = (struct cryptfs *)
+                           fuse_get_context()->private_data;
+    char *encrypted_path;
+    DIR *dir;
+    struct dirent *ent;
+    int rc = -1;
 
-    if (strcmp(path, "/") == 0) {
-        filler(buf, "file54", NULL, 0);
-        filler(buf, "file349", NULL, 0);
+
+    printf("fs_readdir %s\n", path);
+
+    encrypted_path = encrypt_path(path, cfs->file_name_key, cfs->folder);
+    if (!encrypted_path) {
+        print_e("Can't encrypt path %s\n", path);
+        goto out;
     }
-    return 0;
+
+    dir = opendir(encrypted_path);
+    if (!dir) {
+        print_e("Can't open path %s\n", encrypted_path);
+        goto out;
+    }
+
+    while ((ent = readdir(dir)) != NULL) {
+        char *name;
+        if (strcmp(ent->d_name, ".") == 0 ||
+            strcmp(ent->d_name, "..") == 0) {
+            filler(buf, ent->d_name, NULL, 0);
+            continue;
+        }
+
+        name = decrypt_file_name(ent->d_name, cfs->file_name_key);
+        filler(buf, name, NULL, 0);
+        kmem_deref(&name);
+    }
+    closedir(dir);
+    rc = 0;
+out:
+    kmem_deref(&encrypted_path);
+    return rc;
 }
+
 
 static int fs_open(const char *path, struct fuse_file_info *fi)
 {
+    struct cryptfs *cfs = (struct cryptfs *)
+                           fuse_get_context()->private_data;
+    struct opened_file *of;
+    char *encrypted_path;
+    int rc = -1;
+    int fd;
+
     printf("fs_open path = %s\n", path);
-/*    int f;
-    int rc = 0;
-    char *crypt_path = crypt_path(path);
-    if (!crypt_path) {
-        print_e("can't got crypt_path\n");
+    encrypted_path = encrypt_path(path, cfs->file_name_key,
+                                  cfs->folder);
+    if (!encrypted_path) {
+        print_e("Can't encrypt path %s\n", path);
         goto out;
     }
-    f = open(crypt_path, fi->flags);
-    if (f < 0) {
-        print_e("can't open %s\n", crypt_path);
+
+    of = kzref_alloc(sizeof *of, opened_file_destructor);
+    if (!of) {
+        print_e("can't alloc opened_file\n");
         goto out;
     }
+    fi->fh = (uint64_t)of;
+    of->encrypted_path = kmem_ref(encrypted_path);
+    of->file_path = kref_strdub(path);
+    of->flags = fi->flags;
+
+    of->fd = open(of->encrypted_path, fi->flags);
+    if (fd < 0) {
+        print_e("can't open %s\n", of->encrypted_path);
+        goto out;
+    }
+
+    list_append(cfs->opened_files, &of->le, of);
 
     rc = 0;
+    kmem_ref(of);
 out:
-    kmem_deref(&crypt_path);*/
-    return 0;
+    kmem_deref(&of);
+    kmem_deref(&encrypted_path);
+    return rc;
 }
 
-/*читаем данные из открытого файла*/
-static int fs_read(const char *path, char *buf, size_t size, off_t offset,
-              struct fuse_file_info *fi)
+
+static int fs_release(const char *path, struct fuse_file_info *fi)
 {
-    printf("fs_read\n");
-    return 0;
+    struct opened_file *of = (struct opened_file *)fi->fh;
+    printf("fs_release %s\n", path);
+    kmem_deref(&of);
 }
 
-static int fs_write(const char *path, const char *buf, size_t size, off_t offset,
-              struct fuse_file_info *fi)
+
+static int fs_read(const char *path, char *buf,
+                   size_t size, off_t offset,
+                   struct fuse_file_info *fi)
 {
-    printf("fs_write\n");
-    return size;
+    struct opened_file *of = (struct opened_file *)fi->fh;
+    int read_size = -1;
+    printf("fs_read %s\n", path);
+    read_size = read(of->fd, buf, size);
+    return read_size;
 }
+
+
+static int fs_write(const char *path, const char *buf,
+                    size_t size, off_t offset,
+                    struct fuse_file_info *fi)
+{
+    struct opened_file *of = (struct opened_file *)fi->fh;
+    int wrote_size = -1;
+    printf("fs_write %s\n", path);
+    wrote_size = write(of->fd, buf, size);
+    return wrote_size;
+}
+
 
 static int fs_mkdir(const char* path, mode_t mode)
 {
-    printf("fs_mkdir\n");
-    return 0;
+    struct cryptfs *cfs = (struct cryptfs *)
+                           fuse_get_context()->private_data;
+    char *encrypted_path;
+    int rc = -1;
+    printf("fs_mkdir %s\n", path);
+
+    encrypted_path = encrypt_path(path, cfs->file_name_key,
+                                  cfs->folder);
+    if (!encrypted_path) {
+        print_e("Can't encrypt path %s\n", path);
+        goto out;
+    }
+
+    rc = mkdir(encrypted_path, mode);
+    if (rc)
+        rc = -errno;
+out:
+    kmem_deref(&encrypted_path);
+    return rc;
 }
+
 
 static int fs_mknod(const char* path, mode_t mode, dev_t dev)
 {
-    printf("fs_mknod\n");
-    return 0;
+    struct cryptfs *cfs = (struct cryptfs *)
+                           fuse_get_context()->private_data;
+    char *encrypted_path;
+    int rc = -1;
+    printf("fs_mknod %s\n", path);
+
+    encrypted_path = encrypt_path(path, cfs->file_name_key,
+                                  cfs->folder);
+    if (!encrypted_path) {
+        print_e("Can't encrypt path %s\n", path);
+        goto out;
+    }
+
+    rc = mknod(encrypted_path, mode, dev);
+    if (rc) {
+        rc = -errno;
+        goto out;
+    }
+out:
+    kmem_deref(&encrypted_path);
+    return rc;
 }
+
 
 static int fs_rename(const char* old, const char* new)
 {
-    printf("fs_rename\n");
-    return 0;
+    struct cryptfs *cfs = (struct cryptfs *)
+                           fuse_get_context()->private_data;
+    char *encrypted_old, *encrypted_new;
+    int rc = -1;
+    printf("fs_rename %s to %s\n", old, new);
+
+    encrypted_old = encrypt_path(old, cfs->file_name_key,
+                                 cfs->folder);
+    if (!encrypted_old) {
+        print_e("Can't encrypt old path %s\n", old);
+        goto out;
+    }
+
+    encrypted_new = encrypt_path(new, cfs->file_name_key,
+                                 cfs->folder);
+    if (!encrypted_new) {
+        print_e("Can't encrypt old path %s\n", new);
+        goto out;
+    }
+
+    rc = rename(encrypted_old, encrypted_new);
+    if (rc)
+        rc = -errno;
+out:
+    kmem_deref(&encrypted_old);
+    kmem_deref(&encrypted_new);
+    return rc;
 }
+
 
 static int fs_rmdir(const char* path)
 {
-    printf("fs_rmdir\n");
-    return 0;
+    struct cryptfs *cfs = (struct cryptfs *)
+                           fuse_get_context()->private_data;
+    char *encrypted_path;
+    int rc = -1;
+    printf("fs_rmdir %s\n", path);
+
+    encrypted_path = encrypt_path(path, cfs->file_name_key,
+                                  cfs->folder);
+    if (!encrypted_path) {
+        print_e("Can't encrypt path %s\n", path);
+        goto out;
+    }
+
+    rc = rmdir(encrypted_path);
+    if (rc)
+        rc = -errno;
+out:
+    kmem_deref(&encrypted_path);
+    return rc;
 }
+
 
 static int fs_unlink(const char* path)
 {
-    printf("fs_unlink\n");
+    struct cryptfs *cfs = (struct cryptfs *)
+                           fuse_get_context()->private_data;
+    char *encrypted_path;
+    int rc = -1;
+    printf("fs_unlink %s\n", path);
+
+    encrypted_path = encrypt_path(path, cfs->file_name_key,
+                                  cfs->folder);
+    if (!encrypted_path) {
+        print_e("Can't encrypt path %s\n", path);
+        goto out;
+    }
+
+    rc = unlink(encrypted_path);
+    if (rc)
+        rc = -errno;
+out:
+    kmem_deref(&encrypted_path);
+    return rc;
+}
+
+
+static int fs_chmod(const char *path, mode_t mode)
+{
+    struct cryptfs *cfs = (struct cryptfs *)
+                           fuse_get_context()->private_data;
+    char *encrypted_path;
+    int rc = -1;
+    printf("fs_chmod %s\n", path);
+
+    encrypted_path = encrypt_path(path, cfs->file_name_key,
+                                  cfs->folder);
+    if (!encrypted_path) {
+        print_e("Can't encrypt path %s\n", path);
+        goto out;
+    }
+
+    rc = chmod(encrypted_path, mode);
+    if (rc)
+        rc = -errno;
+out:
+    kmem_deref(&encrypted_path);
+    return rc;
+}
+
+
+static int fs_chown(const char *path, uid_t uid, gid_t gid)
+{
+    struct cryptfs *cfs = (struct cryptfs *)
+                           fuse_get_context()->private_data;
+    char *encrypted_path;
+    int rc = -1;
+    printf("fs_chown %s\n", path);
+
+    encrypted_path = encrypt_path(path, cfs->file_name_key,
+                                  cfs->folder);
+    if (!encrypted_path) {
+        print_e("Can't encrypt path %s\n", path);
+        goto out;
+    }
+
+    rc = lchown(encrypted_path, uid, gid);
+    if (rc)
+        rc = -errno;
+out:
+    kmem_deref(&encrypted_path);
+    return rc;
+}
+
+
+static int fs_link(const char *from, const char *to)
+{
+    struct cryptfs *cfs = (struct cryptfs *)
+                           fuse_get_context()->private_data;
+    char *encrypted_from, *encrypted_to;
+    int rc = -1;
+    printf("fs_link %s to %s\n", from, to);
+
+    encrypted_from = encrypt_path(from, cfs->file_name_key,
+                                 cfs->folder);
+    if (!encrypted_from) {
+        print_e("Can't encrypt path_from %s\n", from);
+        goto out;
+    }
+
+    encrypted_to = encrypt_path(to, cfs->file_name_key,
+                                 cfs->folder);
+    if (!encrypted_to) {
+        print_e("Can't encrypt path_to %s\n", to);
+        goto out;
+    }
+
+    rc = link(encrypted_from, encrypted_to);
+    if (rc)
+        rc = -errno;
+out:
+    kmem_deref(&encrypted_from);
+    kmem_deref(&encrypted_to);
+    return rc;
+}
+
+
+static int fs_symlink(const char *from, const char *to)
+{
+    struct cryptfs *cfs = (struct cryptfs *)
+                           fuse_get_context()->private_data;
+    char *encrypted_from, *encrypted_to;
+    int rc = -1;
+    printf("fs_symlink %s to %s\n", from, to);
     return 0;
 }
+
+
+static int fs_statfs(const char *path, struct statvfs *stbuf)
+{
+    struct cryptfs *cfs = (struct cryptfs *)
+                           fuse_get_context()->private_data;
+    char *encrypted_path;
+    int rc = -1;
+    printf("fs_statfs %s\n", path);
+
+    encrypted_path = encrypt_path(path, cfs->file_name_key,
+                                  cfs->folder);
+    if (!encrypted_path) {
+        print_e("Can't encrypt path %s\n", path);
+        goto out;
+    }
+
+    rc = statvfs(encrypted_path, stbuf);
+    if (rc)
+        rc = -errno;
+out:
+    kmem_deref(&encrypted_path);
+    return rc;
+}
+
+
+static int fs_readlink(const char *path, char *buf, size_t size)
+{
+    struct cryptfs *cfs = (struct cryptfs *)
+                           fuse_get_context()->private_data;
+    char *encrypted_path;
+    int rc = -1;
+    printf("fs_readlink %s\n", path);
+
+    encrypted_path = encrypt_path(path, cfs->file_name_key,
+                                  cfs->folder);
+    if (!encrypted_path) {
+        print_e("Can't encrypt path %s\n", path);
+        goto out;
+    }
+
+    rc = readlink(encrypted_path, buf, size - 1);
+    if (rc)
+        rc = -errno;
+out:
+    kmem_deref(&encrypted_path);
+    return rc;
+}
+
+
+static int fs_truncate(const char *path, off_t size)
+{
+    struct cryptfs *cfs = (struct cryptfs *)
+                           fuse_get_context()->private_data;
+    char *encrypted_path;
+    int rc = -1;
+    printf("fs_truncate %s\n", path);
+
+    encrypted_path = encrypt_path(path, cfs->file_name_key,
+                                  cfs->folder);
+    if (!encrypted_path) {
+        print_e("Can't encrypt path %s\n", path);
+        goto out;
+    }
+
+    // TODO:
+    rc = truncate(encrypted_path, size);
+    if (rc)
+        rc = -errno;
+out:
+    kmem_deref(&encrypted_path);
+    return rc;
+}
+
+
+static int fs_utime(const char *path, struct utimbuf *time)
+{
+    struct cryptfs *cfs = (struct cryptfs *)
+                           fuse_get_context()->private_data;
+    char *encrypted_path;
+    int rc = -1;
+    printf("fs_utime %s\n", path);
+
+    encrypted_path = encrypt_path(path, cfs->file_name_key,
+                                  cfs->folder);
+    if (!encrypted_path) {
+        print_e("Can't encrypt path %s\n", path);
+        goto out;
+    }
+
+    rc = utime(encrypted_path, time);
+    if (rc)
+        rc = -errno;
+out:
+    kmem_deref(&encrypted_path);
+    return rc;
+}
+
 
 static struct fuse_operations fs_operations =
 {
     .getattr    = fs_getattr,
     .readdir    = fs_readdir,
     .open       = fs_open,
+    .release    = fs_release,
     .read       = fs_read,
     .write      = fs_write,
     .mkdir      = fs_mkdir,
@@ -141,10 +533,18 @@ static struct fuse_operations fs_operations =
     .rename     = fs_rename,
     .rmdir      = fs_rmdir,
     .unlink     = fs_unlink,
+    .chmod      = fs_chmod,
+    .chown      = fs_chown,
+    .link       = fs_link,
+    .symlink    = fs_symlink,
+    .statfs     = fs_statfs,
+    .readlink   = fs_readlink,
+    .truncate   = fs_truncate,
+    .utime      = fs_utime,
 };
 
 
-struct cryptfs *cryptfs_create(char *crypted_folder, char *key_filename)
+struct cryptfs *cryptfs_create(char *crypted_folder, char *keys_file_name)
 {
     struct cryptfs *cfs;
 
@@ -153,8 +553,8 @@ struct cryptfs *cryptfs_create(char *crypted_folder, char *key_filename)
         goto out;
     }
 
-    if (!file_exist(key_filename)) {
-        print_e("%s file is not exist\n", key_filename);
+    if (!file_exist(keys_file_name)) {
+        print_e("%s file is not exist\n", keys_file_name);
         goto out;
     }
 
@@ -170,11 +570,18 @@ struct cryptfs *cryptfs_create(char *crypted_folder, char *key_filename)
         goto out;
     }
 
-    cfs->key_filename = kref_strdub(key_filename);
-    if (!cfs->key_filename) {
+    cfs->keys_file_name = kref_strdub(keys_file_name);
+    if (!cfs->keys_file_name) {
         print_e("Can't copy file name\n");
         goto out;
     }
+
+    cfs->opened_files = list_create();
+    if (!cfs->opened_files) {
+        print_e("Can't create opened_files list\n");
+        goto out;
+    }
+
     return cfs;
 out:
     kmem_deref(&cfs);
@@ -199,7 +606,7 @@ int cryptfs_mount(struct cryptfs *cfs, char *mount_point_folder, char *password)
         return -1;
     }
 
-    rc = key_file_load(cfs->key_filename, key, &cfs->key_file);
+    rc = key_file_load(cfs->keys_file_name, key, &cfs->key_file);
     switch (rc) {
     case -1:
         print_e("Can't load and encrypt key file\n");
@@ -216,7 +623,7 @@ int cryptfs_mount(struct cryptfs *cfs, char *mount_point_folder, char *password)
         goto out;
     }
 
-    cfs->file_name_key = md5sum(cfs->header_key, 16);
+    cfs->file_name_key = md5sum(cfs->key_file->header_iv, 16);
     if (!cfs->file_name_key) {
         print_e("Can't got md5 for file_name_key\n");
         goto out;

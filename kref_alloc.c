@@ -207,6 +207,9 @@ int kmem_get_ref_count(void *mem)
     struct kralloc *a = (struct kralloc *)mem - 1;
     uint cnt;
 
+    if(strcmp(a->magic, "kralloc") != 0)
+        return 0;
+
     if (a->linked_mem)
         cnt =  a->linked_mem->kref.refcount;
     else
@@ -277,7 +280,7 @@ char *kref_sprintf(const char *fmt, ...)
     return p;
 }
 
-char *kref_strdub(char *src)
+char *kref_strdub(const char *src)
 {
     char *dst;
     int len = strlen(src);

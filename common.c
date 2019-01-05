@@ -96,7 +96,7 @@ int file_put_contents(char *filename, struct buf *buf)
     return 0;
 }
 
-struct list *str_split(char *path, char sep)
+struct list *str_split(const char *path, char sep)
 {
     uint len = strlen(path);
     uint part_len = 0;
@@ -110,9 +110,9 @@ struct list *str_split(char *path, char sep)
         goto err;
     }
 
-    char *part = path;
+    const char *part = path;
     for (i = 0; i < len; i++) {
-        char *p = path + i;
+        const char *p = path + i;
         if (*p != sep) {
             part_len ++;
             continue;
@@ -124,7 +124,7 @@ struct list *str_split(char *path, char sep)
             continue;
         }
 
-        part_buf = buf_cpy(part, part_len);
+        part_buf = buf_cpy((void *)part, part_len);
         if (!part_buf) {
             print_e("Can't alloc for path\n");
             goto err;
@@ -135,7 +135,7 @@ struct list *str_split(char *path, char sep)
     }
 
     if (part_len) {
-        part_buf = buf_cpy(part, part_len);
+        part_buf = buf_cpy((void *)part, part_len);
         if (!part_buf) {
             print_e("Can't alloc for path\n");
             goto err;
