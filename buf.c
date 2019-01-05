@@ -5,7 +5,6 @@ static void buf_destructor(void *mem)
 {
     struct buf *buf = (struct buf *)mem;
     memset(buf->data, 0, buf->len);
-    kmem_deref(buf->data);
 }
 
 struct buf *buf_alloc(uint size)
@@ -19,6 +18,7 @@ struct buf *buf_alloc(uint size)
         return NULL;
 
     buf->len = size;
+    kmem_link_to_kmem(buf->data, buf);
     return buf;
 }
 
@@ -58,6 +58,11 @@ void buf_dump(struct buf *buf, char *name)
     printf("\n");
     if (name)
         printf("buf: %s, ", name);
+
+    if (!buf) {
+        printf("buf is NULL\n");
+        return;
+    }
     printf("len: %d\n", buf->len);
 
     while(cnt < buf->len) {
@@ -84,6 +89,36 @@ void buf_dump(struct buf *buf, char *name)
     }
 }
 
+void buf_list_dump(struct list *list)
+{
+    struct le *le;
+    struct buf *buf;
+    char buf_name[16];
+    uint cnt = 0;
+    uint numbers;
+
+    if (!list) {
+        printf("list is empty\n");
+        return;
+    }
+
+    numbers = list_count(list);
+
+    printf("---\n");
+    printf("buffers in list: %d\n", numbers);
+    if (!numbers)
+        return;
+
+    LIST_FOREACH(list, le) {
+        buf = list_ledata(le);
+        sprintf(buf_name, "buf item %d", cnt);
+        buf_dump(buf, buf_name);
+        cnt ++;
+    }
+    printf("---\n");
+}
+
+
 struct buf *buf_cpy(void *src, uint len)
 {
     struct buf *buf = buf_alloc(len);
@@ -92,4 +127,20 @@ struct buf *buf_cpy(void *src, uint len)
 
     memcpy(buf->data, src, len);
     return buf;
+}
+
+
+char *buf_to_str(struct buf *buf)
+{
+    char *str;
+    if (!buf->data[buf->len - 1])
+        return buf->data;
+
+    str = kref_alloc(buf->len + 1, NULL);
+    if (!str)
+        return NULL;
+    kmem_link_to_kmem(str, buf);
+    memcpy(str, buf->data, buf->len);
+    str[buf->len] = 0;
+    return str;
 }

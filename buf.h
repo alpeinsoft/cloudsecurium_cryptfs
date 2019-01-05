@@ -2,10 +2,12 @@
 #define BUF_H_
 
 #include "kref_alloc.h"
+#include "list.h"
 
 struct buf {
     u8 *data;
     uint len;
+    struct le le;
 };
 
 struct buf *buf_alloc(uint size);
@@ -20,10 +22,13 @@ static inline struct buf *bufz_alloc(uint size)
     return buf;
 }
 
+#define buf_list_append(list, buf) list_append(list, &buf->le, buf)
+
 #define buf_deref(buf) kmem_deref(buf)
 struct buf *buf_cpy(void *src, uint len);
 #define buf_ref(buf) kmem_ref(buf);
 void *buf_concatenate(struct buf *b1, struct buf *b2);
 void buf_dump(struct buf *buf, char *name);
+void buf_list_dump(struct list *list);
 
 #endif /* BUF_H_ */
