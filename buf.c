@@ -4,12 +4,13 @@
 static void buf_destructor(void *mem)
 {
     struct buf *buf = (struct buf *)mem;
-    memset(buf->data, 0, buf->len);
+    if (kmem_get_ref_count(buf->data))
+        memset(buf->data, 0, buf->len);
 }
 
 struct buf *buf_alloc(uint size)
 {
-    struct buf *buf = kref_alloc(sizeof *buf, buf_destructor);
+    struct buf *buf = kzref_alloc(sizeof *buf, buf_destructor);
     if (!buf)
         return NULL;
 

@@ -28,6 +28,7 @@ static inline struct buf *bufz_alloc(uint size)
 struct buf *buf_cpy(void *src, uint len);
 #define buf_ref(buf) kmem_ref(buf);
 void *buf_concatenate(struct buf *b1, struct buf *b2);
+char *buf_to_str(struct buf *buf);
 void buf_dump(struct buf *buf, char *name);
 void buf_list_dump(struct list *list);
 
