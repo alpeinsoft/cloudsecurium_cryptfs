@@ -1,5 +1,26 @@
 #include "list.h"
+#include "kref_alloc.h"
 
+
+static void list_destructor(void *mem)
+{
+    struct list *list = (struct list *)mem;
+    struct le *le;
+    void *item;
+
+    LIST_FOREACH(list, le) {
+        item = list_ledata(le);
+        kmem_deref(&item);
+    }
+    list->head = NULL;
+    list->tail = NULL;
+}
+
+struct list *list_create()
+{
+    struct list *list;
+    return kzref_alloc(sizeof *list, list_destructor);
+}
 
 /**
  * Initialise a linked list
@@ -8,12 +29,13 @@
  */
 void list_init(struct list *list)
 {
-	if (!list)
-		return;
+    if (!list)
+        return;
 
-	list->head = NULL;
-	list->tail = NULL;
+    list->head = NULL;
+    list->tail = NULL;
 }
+
 
 
 /**

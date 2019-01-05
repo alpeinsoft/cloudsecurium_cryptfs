@@ -28,6 +28,7 @@ struct list {
 
 
 void list_init(struct list *list);
+struct list *list_create();
 void list_clear(struct list *list);
 void list_append(struct list *list, struct le *le, void *data);
 void list_unlink(struct le *le);
