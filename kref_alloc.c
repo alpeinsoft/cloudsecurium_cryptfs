@@ -211,7 +211,7 @@ int kmem_get_ref_count(void *mem)
         return 0;
 
     if (a->linked_mem)
-        cnt =  a->linked_mem->kref.refcount;
+        cnt = a->linked_mem->kref.refcount;
     else
         cnt = a->kref.refcount;
     return cnt;
