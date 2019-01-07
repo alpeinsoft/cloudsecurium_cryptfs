@@ -31,6 +31,15 @@ struct opened_file {
     char *file_path;
     char *encrypted_path;
     int flags;
+    struct cryptfs *cfs;
+    struct file_header_format *file_header;
+    struct aes256xts *encrypher;
+    struct aes256xts *decrypher;
+};
+
+struct file_position {
+    off_t block_num;
+    uint block_offset;
 };
 
 void opened_file_destructor(void *mem)
@@ -40,6 +49,200 @@ void opened_file_destructor(void *mem)
     list_unlink(&of->le);
     kmem_deref(&of->file_path);
     kmem_deref(&of->encrypted_path);
+    kmem_deref(&of->file_header);
+    kmem_deref(&of->encrypher);
+    kmem_deref(&of->decrypher);
+}
+
+
+static struct file_header_format *
+read_file_header(int fd, struct buf *iv,
+                 struct buf *key)
+{
+    struct buf *tag;
+    struct buf *header_data_enc;
+    struct buf *header_data;
+    struct file_header_format *file_header = NULL;
+    uint len;
+    int rc;
+    off_t cur_file_offset;
+
+    cur_file_offset = lseek(fd, 0, SEEK_CUR);
+    lseek(fd, 0, SEEK_SET);
+
+    tag = buf_alloc(HEADER_FILE_TAG_LEN);
+    if (!tag) {
+        print_e("Can't alloc for header tag\n");
+        goto out;
+    }
+
+    header_data_enc = buf_alloc(sizeof (struct file_header_format));
+    if (!header_data_enc) {
+        print_e("Can't alloc for header data\n");
+        goto out;
+    }
+
+    len = read(fd, tag->data, tag->len);
+    if (len != tag->len) {
+        print_e("Can't read tag\n");
+        goto out;
+    }
+
+    len = read(fd, header_data_enc->data, header_data_enc->len);
+    if (len != header_data_enc->len) {
+        print_e("Can't read header data\n");
+        goto out;
+    }
+    lseek(fd, cur_file_offset, SEEK_SET);
+
+    rc = crypher_aes256gcm_decrypt(header_data_enc,
+                                   &header_data, tag,
+                                   iv, key);
+    if (rc) {
+        print_e("Can't decrypt file header\n");
+        goto out;
+    }
+
+    file_header = (struct file_header_format *)header_data->data;
+    kmem_ref(header_data);
+out:
+    kmem_deref(&tag);
+    kmem_deref(&header_data_enc);
+    kmem_deref(&header_data);
+    return file_header;
+}
+
+
+static int
+write_file_header(int fd, struct file_header_format *file_header,
+                  struct buf *iv, struct buf *key)
+{
+    off_t cur_file_offset;
+    struct buf *header_data_enc;
+    struct buf *header_data;
+    struct buf *tag;
+    uint len;
+    int rc = -1;
+
+    cur_file_offset = lseek(fd, 0, SEEK_CUR);
+    lseek(fd, 0, SEEK_SET);
+
+    header_data = buf_cpy(file_header, sizeof *file_header);
+    if (!header_data) {
+        print_e("Can't alloc for header_data\n");
+        goto out;
+    }
+
+    rc = crypher_aes256gcm_encrypt(header_data, &header_data_enc,
+                                   &tag, iv, key);
+    if (rc) {
+        print_e("Can't encrypt header_data\n");
+        goto out;
+    }
+
+    len = write(fd, tag->data, tag->len);
+    if (len != tag->len) {
+        print_e("Can't write tag\n");
+        rc = -errno;
+        goto out;
+    }
+
+    len = write(fd, header_data_enc->data, header_data_enc->len);
+    if (len != header_data_enc->len) {
+        print_e("Can't write encrypted file header\n");
+        rc = -errno;
+        goto out;
+    }
+
+    lseek(fd, cur_file_offset, SEEK_SET);
+    rc = 0;
+out:
+    kmem_deref(&header_data_enc);
+    kmem_deref(&header_data);
+    kmem_deref(&tag);
+    return rc;
+}
+
+static int update_file_header(struct opened_file *of, uint new_size)
+{
+    off_t cur_file_offset;
+    int rc;
+
+    of->file_header->fsize = new_size;
+    cur_file_offset = lseek(of->fd, 0, SEEK_CUR);
+    rc = write_file_header(of->fd, of->file_header,
+                           of->cfs->key_file->header_iv,
+                           of->cfs->key_file->data_key);
+    lseek(of->fd, cur_file_offset, SEEK_SET);
+    if (rc) {
+        print_e("Can't write file header\n");
+        return -1;
+    }
+    return 0;
+}
+
+struct file_position *get_file_position(off_t offset)
+{
+    struct file_position *fp;
+    fp = kzref_alloc(sizeof *fp, NULL);
+    if (!fp) {
+        print_e("Can't alloc for file_position\n");
+        return NULL;
+    }
+
+    fp->block_num = offset / DATA_FILE_BLOCK_LEN;
+    fp->block_offset = offset - (fp->block_num * DATA_FILE_BLOCK_LEN);
+    return fp;
+}
+
+static struct buf *load_data_block(struct opened_file *of,
+                                   off_t block_num)
+{
+    struct buf *enc_block;
+    struct buf *block;
+    uint len;
+    off_t cur_offset;
+
+
+    enc_block = buf_alloc(DATA_FILE_BLOCK_LEN);
+    if (!enc_block) {
+        print_e("Can't alloc for encrypted data block\n");
+        goto out;
+    }
+
+    block = buf_alloc(DATA_FILE_BLOCK_LEN);
+    if (!block) {
+        print_e("Can't alloc for uncrypted data block\n");
+        goto out;
+    }
+
+    cur_offset = lseek(of->fd, 0, SEEK_CUR);
+    lseek(of->fd, block_num * DATA_FILE_BLOCK_LEN + HEADER_FILE_LEN, SEEK_SET);
+    len = read(of->fd, enc_block->data, enc_block->len);
+    if (len != enc_block->len) {
+        print_e("Can't read data block\n");
+        goto out;
+    }
+
+    block = crypher_aes256xts_decrypt(of->decrypher, enc_block, block_num);
+    if (!block) {
+        print_e("Can't decrypt data block\n");
+        goto out;
+    }
+
+    lseek(of->fd, cur_offset, SEEK_SET);
+    kmem_ref(block);
+out:
+    kmem_deref(&enc_block);
+    kmem_deref(&block);
+    return block;
+}
+
+
+static int save_data_block(struct opened_file *of, off_t block_num,
+                           struct buf *block)
+{
+// TODO:
 }
 
 
@@ -62,7 +265,6 @@ static int fs_getattr(const char *path, struct stat *st)
     rc = stat(encrypted_path, &cs);
     if (rc) {
         rc = -ENOENT;
-//        print_e("Can't stat %s\n", encrypted_path);
         goto out;
     }
 
@@ -70,9 +272,13 @@ static int fs_getattr(const char *path, struct stat *st)
     st->st_gid = cs.st_gid;
     st->st_atime = cs.st_atime;
     st->st_mtime = cs.st_mtime;
+    st->st_ctim = cs.st_ctim;
     st->st_mode = cs.st_mode;
     st->st_nlink = cs.st_nlink;
     st->st_size = cs.st_size;
+#ifdef __APPLE__
+    stbuf->st_blksize = 0;
+#endif
 
     rc = 0;
 out:
@@ -126,6 +332,7 @@ out:
 }
 
 
+
 static int fs_open(const char *path, struct fuse_file_info *fi)
 {
     struct cryptfs *cfs = (struct cryptfs *)
@@ -151,18 +358,39 @@ static int fs_open(const char *path, struct fuse_file_info *fi)
     fi->fh = (uint64_t)of;
     of->encrypted_path = kmem_ref(encrypted_path);
     of->file_path = kref_strdub(path);
+    //of->flags |= O_DSYNC;
     of->flags = fi->flags;
+    of->cfs = cfs;
+
+    fd = open(of->encrypted_path, O_RDONLY);
+    if (fd <= 0) {
+        print_e("can't open %s, fd = %d\n", of->encrypted_path, fd);
+        goto out;
+    }
+
+    of->file_header = read_file_header(fd, cfs->key_file->header_iv,
+                                       cfs->key_file->data_key);
+    if (!of->file_header) {
+        print_e("can't read file header\n");
+        goto out;
+    }
+    close(fd);
+
+    of->encrypher = crypher_aes256xts_create(cfs->key_file->data_key,
+                                             of->file_header->tweak, 1);
+
+    of->decrypher = crypher_aes256xts_create(cfs->key_file->data_key,
+                                             of->file_header->tweak, 0);
 
     of->fd = open(of->encrypted_path, fi->flags);
-    if (fd < 0) {
+    if (of->fd <= 0) {
+        rc = -errno;
         print_e("can't open %s\n", of->encrypted_path);
         goto out;
     }
 
-    list_append(cfs->opened_files, &of->le, of);
-
+    list_append(cfs->opened_files, &of->le, kmem_ref(of));
     rc = 0;
-    kmem_ref(of);
 out:
     kmem_deref(&of);
     kmem_deref(&encrypted_path);
@@ -185,6 +413,7 @@ static int fs_read(const char *path, char *buf,
     struct opened_file *of = (struct opened_file *)fi->fh;
     int read_size = -1;
     printf("fs_read %s\n", path);
+    lseek(of->fd, HEADER_FILE_LEN + offset, SEEK_SET);
     read_size = read(of->fd, buf, size);
     return read_size;
 }
@@ -196,8 +425,76 @@ static int fs_write(const char *path, const char *buf,
 {
     struct opened_file *of = (struct opened_file *)fi->fh;
     int wrote_size = -1;
+    int rc;
+    off_t block_num;
+    off_t last_offset_enc;
+    struct buf *data_block;
+    struct file_position *fpos;
+    uint free_block_space;
+
+//    offset += HEADER_FILE_LEN;
     printf("fs_write %s\n", path);
+    struct file_position {
+        off_t block_num;
+        uint block_offset;
+    };
+
+    fpos = get_file_position(offset);
+    if (!fpos) {
+        print_e("Can't get file_position\n");
+        goto out;
+    }
+
+    data_block = load_data_block(of, fpos->block_num);
+    if (!data_block) {
+        print_e("Can't load data block\n");
+        goto out;
+    }
+
+    free_block_space = DATA_FILE_BLOCK_LEN - fpos->block_offset;
+
+    if (size <= free_block_space) {
+        memcpy(data_block->data + fpos->block_offset, buf, size);
+        save_data_block(of, fpos->block_num, data_block);
+    } else {
+        uint part_size = free_block_space;
+        uint block_offset = fpos->block_offset;
+        uint buf_offset = 0;
+        block_num = fpos->block_num;
+        while (size > 0) {
+            memcpy(data_block->data + block_offset,
+                   buf + buf_offset, part_size);
+            size -= part_size;
+            buf_offset += part_size;
+            save_data_block(of, block_num++, data_block);
+            block_offset = 0;
+            kmem_deref(&data_block);
+            data_block = load_data_block(of, block_num);
+            if (!data_block) {
+                printf("Can't load data block\n");
+                goto out;
+            }
+
+            part_size = size > DATA_FILE_BLOCK_LEN ? DATA_FILE_BLOCK_LEN : size;
+        }
+        kmem_deref(&data_block);
+    }
+
+
+// TODO:
+
+
+    lseek(of->fd, offset + HEADER_FILE_LEN, SEEK_SET);
     wrote_size = write(of->fd, buf, size);
+
+    rc = update_file_header(of, of->file_header->fsize + wrote_size);
+    if (rc) {
+        print_e("Can't update file header\n");
+        wrote_size = -1;
+        goto out;
+    }
+
+out:
     return wrote_size;
 }
 
@@ -230,8 +527,11 @@ static int fs_mknod(const char* path, mode_t mode, dev_t dev)
 {
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
+    struct file_header_format file_header;
+    struct buf *tweak;
     char *encrypted_path;
     int rc = -1;
+    int fd;
     printf("fs_mknod %s\n", path);
 
     encrypted_path = encrypt_path(path, cfs->file_name_key,
@@ -246,7 +546,30 @@ static int fs_mknod(const char* path, mode_t mode, dev_t dev)
         rc = -errno;
         goto out;
     }
+
+    /* create and write file header */
+    fd = open(encrypted_path, O_WRONLY);
+    if (fd < 0) {
+        rc = -errno;
+        print_e("can't open %s for create file header\n", encrypted_path);
+        goto out;
+    }
+
+    tweak = make_rand_buf(DATA_FILE_TWEAK_LEN);
+    file_header.fsize = 0;
+    memcpy(&file_header.tweak, tweak->data, tweak->len);
+    rc = write_file_header(fd, &file_header,
+                           cfs->key_file->header_iv,
+                           cfs->key_file->data_key);
+    if (rc) {
+        print_e("can't write file_header in file %s\n", encrypted_path);
+        goto out;
+    }
+    close(fd);
+
+    rc = 0;
 out:
+    kmem_deref(&tweak);
     kmem_deref(&encrypted_path);
     return rc;
 }

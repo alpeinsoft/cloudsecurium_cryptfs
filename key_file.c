@@ -49,7 +49,6 @@ int key_file_load(char *filename, struct buf *key,
         goto out;
     }
 
-
     key_file = kzref_alloc(sizeof *key_file, key_file_destructor);
     if (!key_file) {
         print_e("Can't alloc for key_file struct\n");

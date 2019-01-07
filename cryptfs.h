@@ -20,8 +20,19 @@ struct cryptfs {
 
 #define HEADER_FILE_IV_LEN 12
 #define HEADER_FILE_KEY_LEN 32
+#define HEADER_FILE_TAG_LEN AES256GCM_TAG_LEN
+#define HEADER_FILE_LEN (HEADER_FILE_TAG_LEN + sizeof (struct file_header_format))
+
 #define KEY_FILE_KEY_LEN 32
+
 #define DATA_FILE_KEY_LEN 64
+#define DATA_FILE_TWEAK_LEN 16
+#define DATA_FILE_BLOCK_LEN 4096
+
+struct file_header_format {
+    u8 tweak[DATA_FILE_TWEAK_LEN];
+    u32 fsize;
+};
 
 struct cryptfs *cryptfs_create(char *crypted_folder, char *keys_file_name);
 int cryptfs_mount(struct cryptfs *cryptfs, char *mount_point_path, char *password);

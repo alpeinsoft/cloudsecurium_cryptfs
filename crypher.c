@@ -7,6 +7,14 @@
 #include "common.h"
 #include "buf.h"
 #include "base32.h"
+#include "crypher.h"
+
+struct aes256xts {
+    EVP_CIPHER_CTX *c;
+    struct buf *tweak;
+    u32 block_start;
+};
+
 
 void crypher_init()
 {
@@ -37,7 +45,7 @@ int crypher_aes256gcm_encrypt(struct buf *src,
     if (!dst)
         goto err;
 
-    tag = buf_alloc(12);
+    tag = buf_alloc(AES256GCM_TAG_LEN);
     if (!tag)
         goto err;
 
@@ -81,7 +89,8 @@ int crypher_aes256gcm_encrypt(struct buf *src,
     ciphertext_len += len;
     dst->len = ciphertext_len;
 
-    evp_rc = EVP_CIPHER_CTX_ctrl(c, EVP_CTRL_GCM_GET_TAG, 12, tag->data);
+    evp_rc = EVP_CIPHER_CTX_ctrl(c, EVP_CTRL_GCM_GET_TAG,
+                                 AES256GCM_TAG_LEN, tag->data);
     if (evp_rc != 1) {
         print_e("can't get TAG\n");
         EVP_print_errors();
@@ -141,7 +150,8 @@ int crypher_aes256gcm_decrypt(struct buf *src, struct buf **new_dst,
     }
     dst_len = len;
 
-    evp_rc = EVP_CIPHER_CTX_ctrl(c, EVP_CTRL_GCM_SET_TAG, 12, tag->data);
+    evp_rc = EVP_CIPHER_CTX_ctrl(c, EVP_CTRL_GCM_SET_TAG,
+                                 AES256GCM_TAG_LEN, tag->data);
     if (evp_rc != 1) {
         print_e("Can't set TAG\n");
         EVP_print_errors();
@@ -165,6 +175,143 @@ err:
     buf_deref(&dst);
     return rc;
 }
+
+static void aes256xts_destructor(void *mem)
+{
+    struct aes256xts *coder = (struct aes256xts *)mem;
+    EVP_CIPHER_CTX_free(coder->c);
+    kmem_deref(&coder->tweak);
+}
+
+struct aes256xts *crypher_aes256xts_create(struct buf *key,
+                                           struct buf *tweak,
+                                           bool enc_dec)
+{
+    struct aes256xts *coder;
+    EVP_CIPHER_CTX *c;
+    int evp_rc;
+    u32 *block_num;
+
+    coder = kzref_alloc(sizeof *coder, aes256xts_destructor);
+    if (!coder) {
+        print_e("Can't alloc aes256xts encoder\n");
+        goto err;
+    }
+
+    c = EVP_CIPHER_CTX_new();
+    if (!c) {
+        print_e("can't create CIPHER_CTX\n");
+        EVP_print_errors();
+        goto err;
+    }
+
+    coder->c = c;
+    coder->tweak = tweak;
+    block_num = (u32 *)(coder->tweak->data + 12);
+    coder->block_start = *block_num;
+
+    if (enc_dec)
+        evp_rc = EVP_EncryptInit_ex(c, EVP_aes_256_xts(), NULL, key->data, NULL);
+    else
+        evp_rc = EVP_DecryptInit_ex(c, EVP_aes_256_xts(), NULL, key->data, NULL);
+    if (evp_rc != 1) {
+        print_e("can't init (en/de)crypt EVP_aes_256_xts\n");
+        EVP_print_errors();
+        goto err;
+    }
+
+    evp_rc = EVP_CIPHER_CTX_set_padding(c, 0);
+    if (evp_rc != 1) {
+        print_e("can't set padding\n");
+        EVP_print_errors();
+        goto err;
+    }
+
+    kmem_ref(coder);
+err:
+    kmem_deref(&coder);
+    return coder;
+}
+
+struct buf *crypher_aes256xts_encrypt(struct aes256xts *encoder,
+                                      struct buf *src,
+                                      uint block_number)
+{
+    struct buf *dst = NULL;
+    int evp_rc;
+    u32 *block_num;
+    uint len;
+
+    dst = buf_alloc(src->len);
+    if (!dst) {
+        print_e("can't alloc for destination buffer\n");
+        goto err;
+    }
+
+    block_num = (u32 *)(encoder->tweak->data + 12);
+    *block_num = encoder->block_start + block_number;
+    buf_dump(encoder->tweak, "encoder->tweak");
+    evp_rc = EVP_EncryptInit_ex(encoder->c, NULL, NULL,
+                                NULL, encoder->tweak->data);
+    if (evp_rc != 1) {
+        print_e("can't set tweak\n");
+        EVP_print_errors();
+        goto err;
+    }
+
+    evp_rc = EVP_EncryptUpdate(encoder->c, dst->data, &dst->len,
+                               src->data, src->len);
+    if (evp_rc != 1) {
+        print_e("can't encrypt\n");
+        EVP_print_errors();
+        goto err;
+    }
+    buf_ref(dst);
+err:
+    buf_deref(&dst);
+    return dst;
+}
+
+
+struct buf *crypher_aes256xts_decrypt(struct aes256xts *decoder,
+                                      struct buf *src,
+                                      uint block_number)
+{
+    struct buf *dst = NULL;
+    int evp_rc;
+    u32 *block_num;
+    uint len;
+
+    dst = buf_alloc(src->len);
+    if (!dst) {
+        print_e("can't alloc for destination buffer\n");
+        goto err;
+    }
+
+    block_num = (u32 *)(decoder->tweak->data + 12);
+    *block_num = decoder->block_start + block_number;
+    buf_dump(decoder->tweak, "decoder->tweak");
+    evp_rc = EVP_DecryptInit_ex(decoder->c, NULL, NULL, NULL,
+                                decoder->tweak->data);
+    if (evp_rc != 1) {
+        print_e("can't set tweak\n");
+        EVP_print_errors();
+        goto err;
+    }
+
+    evp_rc = EVP_DecryptUpdate(decoder->c, dst->data, &dst->len,
+                               src->data, src->len);
+    if (evp_rc != 1) {
+        print_e("can't decrypt\n");
+        EVP_print_errors();
+        goto err;
+    }
+    buf_ref(dst);
+err:
+    buf_deref(&dst);
+    return dst;
+}
+
 
 struct buf *md5sum(struct buf *src_buf, uint md5len)
 {
