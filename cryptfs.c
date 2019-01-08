@@ -376,11 +376,11 @@ static int fs_open(const char *path, struct fuse_file_info *fi)
     }
     close(fd);
 
-    of->encrypher = crypher_aes256xts_create(cfs->key_file->data_key,
-                                             of->file_header->tweak, 1);
+//    of->encrypher = crypher_aes256xts_create(cfs->key_file->data_key,
+  //                                           of->file_header->tweak, 1);
 
-    of->decrypher = crypher_aes256xts_create(cfs->key_file->data_key,
-                                             of->file_header->tweak, 0);
+    //of->decrypher = crypher_aes256xts_create(cfs->key_file->data_key,
+      //                                       of->file_header->tweak, 0);
 
     of->fd = open(of->encrypted_path, fi->flags);
     if (of->fd <= 0) {
