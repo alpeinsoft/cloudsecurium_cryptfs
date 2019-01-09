@@ -5,7 +5,6 @@
 
 struct key_file {
     struct buf *data_key;
-    struct buf *header_iv;
 };
 
 int key_file_load(char *filename, struct buf *key,

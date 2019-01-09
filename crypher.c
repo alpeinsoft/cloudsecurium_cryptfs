@@ -250,7 +250,6 @@ struct buf *crypher_aes256xts_encrypt(struct aes256xts *encoder,
 
     block_num = (u32 *)(encoder->tweak->data + 12);
     *block_num = encoder->block_start + block_number;
-    buf_dump(encoder->tweak, "encoder->tweak");
     evp_rc = EVP_EncryptInit_ex(encoder->c, NULL, NULL,
                                 NULL, encoder->tweak->data);
     if (evp_rc != 1) {
@@ -290,7 +289,6 @@ struct buf *crypher_aes256xts_decrypt(struct aes256xts *decoder,
 
     block_num = (u32 *)(decoder->tweak->data + 12);
     *block_num = decoder->block_start + block_number;
-    buf_dump(decoder->tweak, "decoder->tweak");
     evp_rc = EVP_DecryptInit_ex(decoder->c, NULL, NULL, NULL,
                                 decoder->tweak->data);
     if (evp_rc != 1) {

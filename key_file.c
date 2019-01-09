@@ -11,12 +11,10 @@ static void key_file_destructor(void *mem)
 {
     struct key_file *key_file = (struct key_file *)mem;
     buf_deref(&key_file->data_key);
-    buf_deref(&key_file->header_iv);
 }
 
 struct key_file_uncrypt_format {
     u8 data_key[DATA_FILE_KEY_LEN];
-    u8 header_iv[HEADER_FILE_IV_LEN];
 };
 
 int key_file_load(char *filename, struct buf *key,
@@ -71,9 +69,6 @@ int key_file_load(char *filename, struct buf *key,
     key_file->data_key = buf_cpy(uncrypt_format->data_key,
                                  sizeof uncrypt_format->data_key);
 
-    key_file->header_iv = buf_cpy(uncrypt_format->header_iv,
-                                  sizeof uncrypt_format->header_iv);
-
     *new_key_file = kmem_ref(key_file);
     rc = 0;
 out:
@@ -102,9 +97,6 @@ int key_file_save(struct key_file *key_file,
                             uncrypt_buf->data;
     memcpy(uncrypt_format->data_key, key_file->data_key->data,
            sizeof uncrypt_format->data_key);
-    memcpy(uncrypt_format->header_iv, key_file->header_iv->data,
-           sizeof uncrypt_format->header_iv);
-    printf("2\n");
 
     iv_buf = buf_cpy(key_file_iv, KEY_FILE_IV_LEN);
     if (!iv_buf)
