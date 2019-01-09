@@ -441,6 +441,7 @@ static int fs_open(const char *path, struct fuse_file_info *fi)
 out:
     kmem_deref(&of);
     kmem_deref(&encrypted_path);
+    kmem_deref(&tweak_buf);
     return rc;
 }
 
