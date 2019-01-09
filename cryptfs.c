@@ -451,7 +451,8 @@ static int fs_release(const char *path, struct fuse_file_info *fi)
     int rc = 0;
     printf("fs_release %s\n", path);
 
-    if ((fi->flags & O_WRONLY) || (fi->flags & O_RDWR)) {
+    if (((fi->flags & O_WRONLY) || (fi->flags & O_RDWR)) &&
+           (of->fsize != of->file_header->fsize)) {
         printf("call update_file_header, fsize = %jd\n", of->fsize);
         rc = update_file_header(of, of->fsize);
         if (rc)
@@ -479,10 +480,85 @@ static int fs_read(const char *path, char *buf,
                    struct fuse_file_info *fi)
 {
     struct opened_file *of = (struct opened_file *)fi->fh;
+    int rc;
+    off_t block_num;
+    struct buf *data_block;
+    uint available_block_data_len;
+    uint part_size, block_offset;
     int read_size = -1;
-    printf("fs_read %s\n", path);
-    lseek(of->fd, HEADER_FILE_LEN + offset, SEEK_SET);
-    read_size = read(of->fd, buf, size);
+    off_t fpos_block_num;
+    uint fpos_block_offset;
+
+    printf("fs_read %s, offset = %jd, size = %zd\n", path, offset, size);
+
+    fpos_block_num = offset / DATA_FILE_BLOCK_LEN;
+    fpos_block_offset = offset - (fpos_block_num * DATA_FILE_BLOCK_LEN);
+
+    printf("fpos_block_num = %jd\n", fpos_block_num);
+    printf("fpos_block_offset = %d\n", fpos_block_offset);
+    printf("of->fsize = %jd\n", of->fsize);
+
+    available_block_data_len = DATA_FILE_BLOCK_LEN - fpos_block_offset;
+
+    if (!of->fsize) {
+        read_size = 0;
+        goto out;
+    }
+
+    printf("loading data block %jd\n", fpos_block_num);
+    data_block = load_data_block(of, fpos_block_num);
+    if (!data_block) {
+        print_e("Can't load data block\n");
+        goto out;
+    }
+
+    part_size = size < available_block_data_len ? size : available_block_data_len;
+    block_offset = fpos_block_offset;
+    read_size = 0;
+    block_num = fpos_block_num;
+
+    printf("available_block_data_len = %d\n", available_block_data_len);
+    printf("part_size = %d\n", part_size);
+    printf("block_offset = %d\n", block_offset);
+
+    printf("! while !\n");
+    while (size > 0) {
+        bool load_next_block_flag = FALSE;
+        printf("do: \n");
+
+        printf("load_data_block, block_num = %jd\n", block_num);
+        data_block = load_data_block(of, block_num++);
+        if (!data_block) {
+            printf("Can't load data block number %jd\n", block_num - 1);
+            break;
+        }
+
+        printf("memcpy read_size = %d, block_offset = %d, part_size = %d\n",
+                read_size, block_offset, part_size);
+
+        memcpy(buf + read_size,
+               data_block->data + block_offset,
+               part_size);
+        kmem_deref(&data_block);
+
+        size -= part_size;
+        read_size += part_size;
+
+        block_offset = 0;
+
+        if ((offset + read_size) < of->fsize)
+            load_next_block_flag = TRUE;
+
+        printf("load_next_block_flag = %d\n", load_next_block_flag);
+        part_size = size < DATA_FILE_BLOCK_LEN ?
+                    size : DATA_FILE_BLOCK_LEN;
+        printf("part_size = %d\n", part_size);
+    }
+    printf("! end while !\n");
+
+    printf("read_size = %d\n", read_size);
+out:
+    kmem_deref(&data_block);
     return read_size;
 }
 
@@ -506,14 +582,13 @@ static int fs_write(const char *path, const char *buf,
 
     fpos_block_num = offset / DATA_FILE_BLOCK_LEN;
     fpos_block_offset = offset - (fpos_block_num * DATA_FILE_BLOCK_LEN);
-    last_block = of->fsize / DATA_FILE_BLOCK_LEN;
+    last_block = (of->fsize - 1) / DATA_FILE_BLOCK_LEN;
 
     printf("fpos_block_num = %jd\n", fpos_block_num);
     printf("fpos_block_offset = %d\n", fpos_block_offset);
     printf("last_block  = %jd\n", last_block);
     printf("of->fsize = %jd\n", of->fsize);
 
-    //load_block_flag
     free_block_space = DATA_FILE_BLOCK_LEN - fpos_block_offset;
 
     if (of->fsize && (fpos_block_num <= last_block)) {
@@ -540,7 +615,6 @@ static int fs_write(const char *path, const char *buf,
     printf("free_block_space = %d\n", free_block_space);
     printf("part_size = %d\n", part_size);
     printf("block_offset = %d\n", block_offset);
-    printf("free_block_space = %d\n", free_block_space);
 
     printf("! while !\n");
     while (size > 0) {
@@ -911,7 +985,9 @@ static int fs_truncate(const char *path, off_t size)
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
     char *encrypted_path;
+    struct file_header_format *file_header;
     int rc = -1;
+    off_t blocks, len;
     printf("fs_truncate %s\n", path);
 
     encrypted_path = encrypt_path(path, cfs->file_name_key,
@@ -921,11 +997,23 @@ static int fs_truncate(const char *path, off_t size)
         goto out;
     }
 
-    // TODO:
-    rc = truncate(encrypted_path, size);
+    file_header = read_file_header(encrypted_path,
+                                   cfs->key_file->data_key);
+    if (!file_header) {
+        print_e("Can't read file header %s\n", encrypted_path);
+        goto out;
+    }
+
+    // TODO: needs to change size. This code doesn't work.
+
+    blocks = file_header->fsize / DATA_FILE_BLOCK_LEN;
+    len = HEADER_FILE_LEN + (blocks + 1) * DATA_FILE_BLOCK_LEN;
+    printf("truncate file %s to len: %jd\n", encrypted_path, len);
+    rc = truncate(encrypted_path, len);
     if (rc)
         rc = -errno;
 out:
+    kmem_deref(&file_header);
     kmem_deref(&encrypted_path);
     return rc;
 }
@@ -974,7 +1062,7 @@ static struct fuse_operations fs_operations =
     .symlink    = fs_symlink,
     .statfs     = fs_statfs,
     .readlink   = fs_readlink,
-    .truncate   = fs_truncate,
+//    .truncate   = fs_truncate,
     .utime      = fs_utime,
 };
 
