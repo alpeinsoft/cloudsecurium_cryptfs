@@ -279,6 +279,206 @@ out:
 }
 
 
+
+static uint get_aligned_file_name_len(uint name_len)
+{
+    uint align = 5;
+    return (name_len / align + 1) * align;
+}
+
+static char *decrypt_file_name(struct cryptfs *cfs,
+                               char *enc_file_name)
+{
+    struct buf *enc_file_name_buf;
+    struct buf *decode_base32_enc_fname;
+    struct buf *enc_fname, *tag, *fname;
+    struct buf *iv;
+    struct buf *key;
+    u8 *p;
+    int rc;
+
+    if (!enc_file_name || !cfs) {
+        print_e("incorrect args for decrypt_file_name\n");
+        return NULL;
+    }
+    iv = cfs->key_file->file_iv;
+    key = cfs->file_name_key;
+
+    enc_file_name_buf = buf_strdub(enc_file_name);
+    if (!enc_file_name_buf) {
+        print_e("Can't alloc enc_name_buf\n");
+        goto out;
+    }
+
+    decode_base32_enc_fname = base32_decode_buf(enc_file_name_buf);
+    if (!decode_base32_enc_fname) {
+        print_e("Can't decode enc_fname_buf\n");
+        goto out;
+    }
+
+    p = decode_base32_enc_fname->data;
+    tag = buf_cpy(p, FILE_NAME_TAG_LEN);
+    if (!tag) {
+        print_e("Can't copy TAG\n");
+        goto out;
+    }
+    p += FILE_NAME_TAG_LEN;
+
+    enc_fname = buf_cpy(p, decode_base32_enc_fname->len -
+                           FILE_NAME_TAG_LEN);
+    if (!enc_fname) {
+        print_e("Can't copy encrypthed file name\n");
+        goto out;
+    }
+
+    rc = crypher_aes256gcm_decrypt(enc_fname, &fname, tag, iv, key);
+    if (rc) {
+        print_e("Can't decrypt file name\n");
+        goto out;
+    }
+
+    buf_ref(fname);
+out:
+    buf_deref(&enc_file_name_buf);
+    buf_deref(&decode_base32_enc_fname);
+    buf_deref(&enc_fname);
+    buf_deref(&tag);
+    buf_deref(&fname);
+    return buf_to_str(fname);
+}
+
+static struct buf *
+encrypt_file_name(char *name, struct buf *key, struct buf *iv)
+{
+    struct buf *base32_enc_fname = NULL;
+    struct buf *enc_fname_aligned;
+    struct buf *name_buf, *name_enc_buf, *tag;
+    uint flen = strlen(name);
+    uint flen_aligned;
+    uint full_len;
+    uint aligned_full_len;
+    uint i;
+    int rc;
+
+    if (!name || !key) {
+        print_e("incorrect args for encrypt_file_name\n");
+        return NULL;
+    }
+
+    full_len = FILE_NAME_TAG_LEN + flen;
+    aligned_full_len = get_aligned_file_name_len(full_len);
+    flen_aligned = flen + (aligned_full_len - full_len);
+
+    name_buf = bufz_alloc(flen_aligned);
+    if (!name_buf) {
+        print_e("Can't alloc new aligned file name\n");
+        goto err;
+    }
+    memcpy(name_buf->data, name, flen);
+
+    rc = crypher_aes256gcm_encrypt(name_buf, &name_enc_buf, &tag, iv, key);
+    if (rc) {
+        print_e("Can't encrypt file name\n");
+        goto err;
+    }
+
+    enc_fname_aligned = bufz_alloc(flen_aligned + FILE_NAME_TAG_LEN);
+    if (!enc_fname_aligned) {
+        print_e("Can't alloc for enc_fname_aligned\n");
+        goto err;
+    }
+    memcpy(enc_fname_aligned->data, tag->data, tag->len);
+    memcpy(enc_fname_aligned->data + tag->len,
+           name_enc_buf->data, name_enc_buf->len);
+
+    base32_enc_fname = base32_encode_buf(enc_fname_aligned);
+    if (!base32_enc_fname) {
+        print_e("Can't got base32 for encrypted file name\n");
+        goto err;
+    }
+
+    buf_ref(base32_enc_fname);
+err:
+    buf_deref(&enc_fname_aligned);
+    buf_deref(&base32_enc_fname);
+    buf_deref(&name_buf);
+    buf_deref(&name_enc_buf);
+    buf_deref(&tag);
+    return base32_enc_fname;
+}
+
+
+static char *encrypt_path(struct cryptfs *cfs,
+                          const char *uncrypt_path,
+                          char *path_prefix)
+{
+    struct buf *crypt_path;
+    struct list *parts;
+    struct list *crypted_parts;
+    uint crypt_path_len;
+    struct le *le;
+    char *p;
+    struct buf *iv = cfs->key_file->file_iv;
+    struct buf *key = cfs->file_name_key;
+    uint path_prefix_len = strlen(path_prefix);
+
+    parts = str_split(uncrypt_path, '/');
+    if (!parts) {
+        print_e("Can't split string: '%s'\n", uncrypt_path);
+        goto err;
+    }
+
+    crypted_parts = list_create();
+    if (!crypted_parts) {
+        print_e("Can't alloc list crypted_parts\n");
+        goto err;
+    }
+
+    crypt_path_len = path_prefix_len;
+    LIST_FOREACH(parts, le) {
+        struct buf *part = list_ledata(le);
+        struct buf *crypted_part;
+        crypted_part = encrypt_file_name(buf_to_str(part), key, iv);
+        if (!crypted_part) {
+            print_e("Can't encrypt file name\n");
+            goto err;
+        }
+
+        buf_list_append(crypted_parts, crypted_part);
+        crypt_path_len += crypted_part->len + 1;
+    }
+
+    crypt_path = buf_alloc(crypt_path_len);
+    if (!crypt_path) {
+        print_e("can't alloc for crypt_path_len\n");
+        goto err;
+    }
+
+    p = crypt_path->data;
+    memcpy(p, path_prefix, path_prefix_len);
+    p += path_prefix_len;
+    if (path_prefix[path_prefix_len - 1] == '/')
+        p--;
+
+    LIST_FOREACH(crypted_parts, le) {
+        struct buf *crypted_part = list_ledata(le);
+        *p++ = '/';
+        memcpy(p, crypted_part->data, crypted_part->len - 1);
+        p += crypted_part->len - 1;
+    }
+
+    *p = 0;
+    crypt_path->len = strlen(crypt_path->data);
+    buf_ref(crypt_path);
+err:
+    buf_deref(&crypt_path);
+    kmem_deref(&parts);
+    kmem_deref(&crypted_parts);
+    return buf_to_str(crypt_path);
+}
+
+
+
 static int fs_getattr(const char *path, struct stat *st)
 {
     struct cryptfs *cfs = (struct cryptfs *)
@@ -288,13 +488,12 @@ static int fs_getattr(const char *path, struct stat *st)
     struct file_header_format *file_header;
     int rc = -1;
     printf("call fs_getattr '%s'\n", path);
-    encrypted_path = encrypt_path(path,
-                                  cfs->file_name_key,
-                                  cfs->folder);
+    encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
         print_e("Can't encrypt path %s\n", path);
         goto out;
     }
+    printf("encrypted_path = %s\n", encrypted_path);
 
     rc = stat(encrypted_path, &cs);
     if (rc) {
@@ -344,7 +543,7 @@ static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
     printf("fs_readdir %s\n", path);
 
-    encrypted_path = encrypt_path(path, cfs->file_name_key, cfs->folder);
+    encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
         print_e("Can't encrypt path %s\n", path);
         goto out;
@@ -364,7 +563,7 @@ static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
             continue;
         }
 
-        name = decrypt_file_name(ent->d_name, cfs->file_name_key);
+        name = decrypt_file_name(cfs, ent->d_name);
         filler(buf, name, NULL, 0);
         kmem_deref(&name);
     }
@@ -389,8 +588,7 @@ static int fs_open(const char *path, struct fuse_file_info *fi)
     printf("fi->flags = 0x%x\n", fi->flags);
 
     printf("fs_open path = %s\n", path);
-    encrypted_path = encrypt_path(path, cfs->file_name_key,
-                                  cfs->folder);
+    encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
         print_e("Can't encrypt path %s\n", path);
         goto out;
@@ -694,8 +892,7 @@ static int fs_mkdir(const char* path, mode_t mode)
     int rc = -1;
     printf("fs_mkdir %s\n", path);
 
-    encrypted_path = encrypt_path(path, cfs->file_name_key,
-                                  cfs->folder);
+    encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
         print_e("Can't encrypt path %s\n", path);
         goto out;
@@ -721,8 +918,7 @@ static int fs_mknod(const char* path, mode_t mode, dev_t dev)
     int fd;
     printf("fs_mknod %s\n", path);
 
-    encrypted_path = encrypt_path(path, cfs->file_name_key,
-                                  cfs->folder);
+    encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
         print_e("Can't encrypt path %s\n", path);
         goto out;
@@ -769,15 +965,13 @@ static int fs_rename(const char* old, const char* new)
     int rc = -1;
     printf("fs_rename %s to %s\n", old, new);
 
-    encrypted_old = encrypt_path(old, cfs->file_name_key,
-                                 cfs->folder);
+    encrypted_old = encrypt_path(cfs, old, cfs->folder);
     if (!encrypted_old) {
         print_e("Can't encrypt old path %s\n", old);
         goto out;
     }
 
-    encrypted_new = encrypt_path(new, cfs->file_name_key,
-                                 cfs->folder);
+    encrypted_new = encrypt_path(cfs, new, cfs->folder);
     if (!encrypted_new) {
         print_e("Can't encrypt old path %s\n", new);
         goto out;
@@ -801,8 +995,7 @@ static int fs_rmdir(const char* path)
     int rc = -1;
     printf("fs_rmdir %s\n", path);
 
-    encrypted_path = encrypt_path(path, cfs->file_name_key,
-                                  cfs->folder);
+    encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
         print_e("Can't encrypt path %s\n", path);
         goto out;
@@ -825,8 +1018,7 @@ static int fs_unlink(const char* path)
     int rc = -1;
     printf("fs_unlink %s\n", path);
 
-    encrypted_path = encrypt_path(path, cfs->file_name_key,
-                                  cfs->folder);
+    encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
         print_e("Can't encrypt path %s\n", path);
         goto out;
@@ -849,8 +1041,7 @@ static int fs_chmod(const char *path, mode_t mode)
     int rc = -1;
     printf("fs_chmod %s\n", path);
 
-    encrypted_path = encrypt_path(path, cfs->file_name_key,
-                                  cfs->folder);
+    encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
         print_e("Can't encrypt path %s\n", path);
         goto out;
@@ -873,8 +1064,7 @@ static int fs_chown(const char *path, uid_t uid, gid_t gid)
     int rc = -1;
     printf("fs_chown %s\n", path);
 
-    encrypted_path = encrypt_path(path, cfs->file_name_key,
-                                  cfs->folder);
+    encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
         print_e("Can't encrypt path %s\n", path);
         goto out;
@@ -897,15 +1087,13 @@ static int fs_link(const char *from, const char *to)
     int rc = -1;
     printf("fs_link %s to %s\n", from, to);
 
-    encrypted_from = encrypt_path(from, cfs->file_name_key,
-                                 cfs->folder);
+    encrypted_from = encrypt_path(cfs, from, cfs->folder);
     if (!encrypted_from) {
         print_e("Can't encrypt path_from %s\n", from);
         goto out;
     }
 
-    encrypted_to = encrypt_path(to, cfs->file_name_key,
-                                 cfs->folder);
+    encrypted_to = encrypt_path(cfs, to, cfs->folder);
     if (!encrypted_to) {
         print_e("Can't encrypt path_to %s\n", to);
         goto out;
@@ -940,8 +1128,7 @@ static int fs_statfs(const char *path, struct statvfs *stbuf)
     int rc = -1;
     printf("fs_statfs %s\n", path);
 
-    encrypted_path = encrypt_path(path, cfs->file_name_key,
-                                  cfs->folder);
+    encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
         print_e("Can't encrypt path %s\n", path);
         goto out;
@@ -964,8 +1151,7 @@ static int fs_readlink(const char *path, char *buf, size_t size)
     int rc = -1;
     printf("fs_readlink %s\n", path);
 
-    encrypted_path = encrypt_path(path, cfs->file_name_key,
-                                  cfs->folder);
+    encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
         print_e("Can't encrypt path %s\n", path);
         goto out;
@@ -990,8 +1176,7 @@ static int fs_truncate(const char *path, off_t size)
     off_t blocks, len;
     printf("fs_truncate %s\n", path);
 
-    encrypted_path = encrypt_path(path, cfs->file_name_key,
-                                  cfs->folder);
+    encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
         print_e("Can't encrypt path %s\n", path);
         goto out;
@@ -1027,8 +1212,7 @@ static int fs_utime(const char *path, struct utimbuf *time)
     int rc = -1;
     printf("fs_utime %s\n", path);
 
-    encrypted_path = encrypt_path(path, cfs->file_name_key,
-                                  cfs->folder);
+    encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
         print_e("Can't encrypt path %s\n", path);
         goto out;
@@ -1208,6 +1392,12 @@ int cryptfs_generate_key_file(char *password, char *filename)
         goto out;
     }
 
+    key_file.file_iv = make_rand_buf(FILE_NAME_IV_LEN);
+    if (!key_file.file_iv) {
+        print_e("Can't generate file IV key\n");
+        goto out;
+    }
+
     pass = buf_strdub(password);
     if (!pass)
         goto out;
@@ -1229,6 +1419,7 @@ out:
     buf_deref(&key);
     buf_deref(&pass);
     buf_deref(&key_file.data_key);
+    buf_deref(&key_file.file_iv);
     return rc;
 }
 

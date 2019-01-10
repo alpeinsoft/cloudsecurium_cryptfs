@@ -26,6 +26,11 @@ struct cryptfs {
 
 #define KEY_FILE_KEY_LEN 32
 
+#define FILE_NAME_KEY_LEN 32
+#define FILE_NAME_IV_LEN 12
+#define FILE_NAME_TAG_LEN 12
+
+
 #define DATA_FILE_KEY_LEN 64
 #define DATA_FILE_TWEAK_LEN 16
 #define DATA_FILE_BLOCK_LEN 16 // Needs 4096
