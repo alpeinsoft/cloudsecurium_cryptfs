@@ -564,6 +564,10 @@ static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
         }
 
         name = decrypt_file_name(cfs, ent->d_name);
+        if (!name) {
+            print_e("Can't decrypt file\n");
+            continue;
+        }
         filler(buf, name, NULL, 0);
         kmem_deref(&name);
     }
@@ -1192,12 +1196,13 @@ static int fs_truncate(const char *path, off_t size)
 
     // TODO: needs to change size. This code doesn't work.
 
-    blocks = file_header->fsize / DATA_FILE_BLOCK_LEN;
+/*    blocks = file_header->fsize / DATA_FILE_BLOCK_LEN;
     len = HEADER_FILE_LEN + (blocks + 1) * DATA_FILE_BLOCK_LEN;
     printf("truncate file %s to len: %jd\n", encrypted_path, len);
     rc = truncate(encrypted_path, len);
     if (rc)
-        rc = -errno;
+        rc = -errno;*/
+    rc = 0;
 out:
     kmem_deref(&file_header);
     kmem_deref(&encrypted_path);
@@ -1247,7 +1252,7 @@ static struct fuse_operations fs_operations =
     .symlink    = fs_symlink,
     .statfs     = fs_statfs,
     .readlink   = fs_readlink,
-//    .truncate   = fs_truncate,
+    .truncate   = fs_truncate,
     .utime      = fs_utime,
 };
 
@@ -1299,22 +1304,24 @@ out:
 
 int cryptfs_mount(struct cryptfs *cfs, char *mount_point_folder, char *password)
 {
-    struct buf *key;
+    struct buf *key_file_key;
     struct buf *pass;
     struct fuse_args fuse_args = FUSE_ARGS_INIT(0, NULL);
     int rc = -1;
 
     pass = buf_strdub(password);
-    if (!pass)
+    if (!pass) {
+        print_e("Can't alloc for pass\n");
         goto out;
+    }
 
-    key = md5sum(pass, KEY_FILE_KEY_LEN);
-    if (!key) {
+    key_file_key = sha256(pass, KEY_FILE_KEY_LEN);
+    if (!key_file_key) {
         print_e("Can't got md5 for key\n");
         return -1;
     }
 
-    rc = key_file_load(cfs->keys_file_name, key, &cfs->key_file);
+    rc = key_file_load(cfs->keys_file_name, key_file_key, &cfs->key_file);
     switch (rc) {
     case -1:
         print_e("Can't load and encrypt key file\n");
@@ -1325,13 +1332,13 @@ int cryptfs_mount(struct cryptfs *cfs, char *mount_point_folder, char *password)
         goto out;
     }
 
-    cfs->header_key = md5sum(key, HEADER_FILE_KEY_LEN);
+    cfs->header_key = sha256(cfs->key_file->data_key, HEADER_FILE_KEY_LEN);
     if (!cfs->header_key) {
         print_e("Can't got md5 for header_key\n");
         goto out;
     }
 
-    cfs->file_name_key = md5sum(cfs->key_file->data_key, 16);
+    cfs->file_name_key = sha256(cfs->header_key, FILE_NAME_KEY_LEN);
     if (!cfs->file_name_key) {
         print_e("Can't got md5 for file_name_key\n");
         goto out;
@@ -1361,7 +1368,7 @@ int cryptfs_mount(struct cryptfs *cfs, char *mount_point_folder, char *password)
     rc = 0;
 out:
     buf_deref(&pass);
-    buf_deref(&key);
+    buf_deref(&key_file_key);
     return rc;
 }
 
@@ -1403,9 +1410,9 @@ int cryptfs_generate_key_file(char *password, char *filename)
     if (!pass)
         goto out;
 
-    key = md5sum(pass, KEY_FILE_KEY_LEN);
+    key = sha256(pass, KEY_FILE_KEY_LEN);
     if (!key) {
-        print_e("Can't got md5 for key\n");
+        print_e("Can't got sha256 for key\n");
         goto out;
     }
 

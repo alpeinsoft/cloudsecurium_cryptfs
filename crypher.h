@@ -25,6 +25,7 @@ struct buf *crypher_aes256xts_decrypt(struct aes256xts *decoder,
                                       uint block_number);
 
 struct buf *md5sum(struct buf *src, uint md5len);
+struct buf *sha256(struct buf *src_buf, uint sha_len);
 struct buf *make_rand_buf(uint len);
 struct buf *base64_encode(struct buf *in);
 struct buf *base64_decode(struct buf *in);

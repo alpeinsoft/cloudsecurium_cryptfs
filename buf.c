@@ -134,6 +134,8 @@ struct buf *buf_cpy(void *src, uint len)
 char *buf_to_str(struct buf *buf)
 {
     char *str;
+    if (!buf)
+        return NULL;
     if (!buf->data[buf->len - 1])
         return buf->data;
 

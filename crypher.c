@@ -3,6 +3,7 @@
 #include <openssl/err.h>
 #include <openssl/md5.h>
 #include <openssl/bio.h>
+#include <openssl/sha.h>
 #include <math.h>
 #include "common.h"
 #include "buf.h"
@@ -206,7 +207,7 @@ struct aes256xts *crypher_aes256xts_create(struct buf *key,
     }
 
     coder->c = c;
-    coder->tweak = tweak;
+    coder->tweak = kmem_ref(tweak);
     block_num = (u32 *)(coder->tweak->data + 12);
     coder->block_start = *block_num;
 
@@ -248,7 +249,8 @@ struct buf *crypher_aes256xts_encrypt(struct aes256xts *encoder,
         goto err;
     }
 
-    block_num = (u32 *)(encoder->tweak->data + 12);
+    block_num = (u32 *)(encoder->tweak->data +
+                        (encoder->tweak->len - 4));
     *block_num = encoder->block_start + block_number;
     evp_rc = EVP_EncryptInit_ex(encoder->c, NULL, NULL,
                                 NULL, encoder->tweak->data);
@@ -287,7 +289,8 @@ struct buf *crypher_aes256xts_decrypt(struct aes256xts *decoder,
         goto err;
     }
 
-    block_num = (u32 *)(decoder->tweak->data + 12);
+    block_num = (u32 *)(decoder->tweak->data +
+                        (decoder->tweak->len - 4));
     *block_num = decoder->block_start + block_number;
     evp_rc = EVP_DecryptInit_ex(decoder->c, NULL, NULL, NULL,
                                 decoder->tweak->data);
@@ -347,6 +350,44 @@ struct buf *md5sum(struct buf *src_buf, uint md5len)
     }
     return dst;
 }
+
+struct buf *sha256(struct buf *src_buf, uint sha_len)
+{
+    SHA256_CTX sha256;
+    int len;
+    u8 *src;
+    char hash[SHA256_DIGEST_LENGTH];
+    uint dst_cnt = 0;
+
+    struct buf *dst = buf_alloc(sha_len);
+    if (!dst) {
+        perror("Can't alloc for sha256\n");
+        return NULL;
+    }
+
+    src = src_buf->data;
+    len = src_buf->len;
+    while(dst_cnt < sha_len) {
+        uint part_len = ((sha_len - dst_cnt) < sizeof hash) ?
+                          sha_len - dst_cnt : sizeof hash;
+        SHA256_Init(&sha256);
+        while (len > 0) {
+            if (len > 512)
+                SHA256_Update(&sha256, src, 512);
+            else
+                SHA256_Update(&sha256, src, len);
+            len -= 512;
+            src += 512;
+        }
+        SHA256_Final(hash, &sha256);
+        memcpy(dst->data + dst_cnt, hash, part_len);
+        dst_cnt += part_len;
+        src = hash;
+        len = sizeof hash;
+    }
+    return dst;
+}
+
 
 
 struct buf *base64_encode(struct buf *in)
