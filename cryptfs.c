@@ -4,7 +4,11 @@
 #include <time.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <fuse.h>
+#ifdef __APPLE__
+    #include <osxfuse/fuse.h>
+#else
+    #include <fuse.h>
+#endif
 #include <unistd.h>
 #include <dirent.h>
 #include "kref_alloc.h"
@@ -516,11 +520,12 @@ static int fs_getattr(const char *path, struct stat *st)
     st->st_gid = cs.st_gid;
     st->st_atime = cs.st_atime;
     st->st_mtime = cs.st_mtime;
-    st->st_ctim = cs.st_ctim;
     st->st_mode = cs.st_mode;
     st->st_nlink = cs.st_nlink;
 #ifdef __APPLE__
-    stbuf->st_blksize = 0;
+    st->st_blksize = 0;
+#else
+    st->st_ctim = cs.st_ctim;
 #endif
 
     rc = 0;
