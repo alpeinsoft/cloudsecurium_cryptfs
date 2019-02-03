@@ -4,7 +4,6 @@
 #include "kref_alloc.h"
 #include <stdarg.h>
 
-
 struct kralloc {
     char magic[8];
     struct list list;

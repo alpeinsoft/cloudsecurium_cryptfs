@@ -1,43 +1,25 @@
 CC=gcc
-CFLAGS=  -O3 -D_FILE_OFFSET_BITS=64 -DFUSE_USE_VERSION=26
-OBJECTS= base32.o cryptfs.o key_file.o crypher.o buf.o common.o list.o kref.o kref_alloc.o test.o
-LIBS = -L . -lssl -lcrypto -lfuse -lm
+CFLAGS=-O3 -D_FILE_OFFSET_BITS=64 -DFUSE_USE_VERSION=26
+SOURCES=base32.c cryptfs.c key_file.c crypher.c buf.c common.c list.c kref.c kref_alloc.c
 
+UNAME=S(shell uname)
+SOURCES_DIR=$(shell pwd)
+
+#ifeq ($(UNAME),Linux)
+    LIBS = -L . -lssl -lcrypto -lfuse -lm
+#else ifeq ($(UNAME),Darwin)
+#    LIBS = -L . -lssl -lcrypto -losxfuse -lm
+#endif
 
 # --- targets
-all: crypt
-crypt: $(OBJECTS)
-	$(CC) test.o base32.o cryptfs.o key_file.o crypher.o common.o buf.o list.o kref.o kref_alloc.o -o test $(LIBS)
-        
-test.o:
-	$(CC) $(CFLAGS) -c test.c
-
-kref_alloc.o:
-	$(CC) $(CFLAGS) -c kref_alloc.c
-
-list.o:
-	$(CC) $(CFLAGS) -c list.c
-
-kref.o:
-	$(CC) $(CFLAGS) -c kref.c
-
-common.o:
-	$(CC) $(CFLAGS) -c common.c
-
-buf.o:
-	$(CC) $(CFLAGS) -c buf.c
-
-crypher.o:
-	$(CC) $(CFLAGS) -c crypher.c
-
-key_file.o:
-	$(CC) $(CFLAGS) -c key_file.c
-
-cryptfs.o:
-	$(CC) $(CFLAGS) -c cryptfs.c
-
-base32.o:
-	$(CC) $(CFLAGS) -c base32.c
+all: lib test
+test:
+	$(CC) -I$(SOURCES_DIR) -L$(SOURCES_DIR) $(CFLAGS) $(LIBS) -lcryptfs test.c -o test
+       
+lib:
+	$(CC) -shared -fPIC $(CFLAGS) $(LIBS) $(SOURCES) -o libcryptfs.so
        
 clean:
-	rm -f crypt $(OBJECTS)
+	rm -f crypt *o
+	rm -f test
+	rm -f *.so
