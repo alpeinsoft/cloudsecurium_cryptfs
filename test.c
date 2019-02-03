@@ -20,7 +20,6 @@ int main()
     char *folder = "/home/stelhs/kravchenko/CryptFS/crypted_fs";
 
     struct aes256xts *encoder, *decoder;
-    struct buf *tweak1, *tweak2, *src, *encoded, *decoded;
  /*   char *enc;
     struct buf *key = buf_strdub("bla bla bla");
 
@@ -28,16 +27,19 @@ int main()
     printf("enc = %s\n", enc);*/
 
 //    rc = cryptfs_generate_key_file("bla", key_filename);
-    //printf("cryptfs_generate_key_file return %d\n", rc);
+//    printf("cryptfs_generate_key_file return %d\n", rc);
 
     cfs = cryptfs_create("/home/stelhs/kravchenko/CryptFS/crypted_fs",
                          key_filename);
-    if (!cfs)
+    if (!cfs) {
         print_e("cryptfs_create error\n");
+        return -1;
+    }
 
     rc = cryptfs_mount(cfs, "/home/stelhs/kravchenko/CryptFS/uncrypted_fs", "bla");
     if (rc) {
         print_e("cryptfs_mount error: %d\n", rc);
+        return -1;
     }
 
     cryptfs_loop(cfs);

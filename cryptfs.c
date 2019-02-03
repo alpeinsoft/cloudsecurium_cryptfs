@@ -1196,12 +1196,12 @@ static int fs_truncate(const char *path, off_t size)
 
     // TODO: needs to change size. This code doesn't work.
 
-/*    blocks = file_header->fsize / DATA_FILE_BLOCK_LEN;
+    blocks = file_header->fsize / DATA_FILE_BLOCK_LEN;
     len = HEADER_FILE_LEN + (blocks + 1) * DATA_FILE_BLOCK_LEN;
     printf("truncate file %s to len: %jd\n", encrypted_path, len);
     rc = truncate(encrypted_path, len);
     if (rc)
-        rc = -errno;*/
+        rc = -errno;
     rc = 0;
 out:
     kmem_deref(&file_header);
