@@ -12,6 +12,14 @@
     fprintf(stderr, (format), ##__VA_ARGS__); \
 }
 
+#ifdef DEBUG
+    #define print_d(format, ...) { \
+        fprintf(stdout, "%s +%d, %s(): ", __FILE__, __LINE__, __FUNCTION__); \
+        fprintf(stdout, (format), ##__VA_ARGS__); \
+    }
+#else
+    #define print_d(format, ...)
+#endif
 
 static inline void print_backtrace()
 {

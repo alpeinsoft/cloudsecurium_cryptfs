@@ -491,13 +491,13 @@ static int fs_getattr(const char *path, struct stat *st)
     struct stat cs;
     struct file_header_format *file_header;
     int rc = -1;
-    printf("call fs_getattr '%s'\n", path);
+    print_d("call fs_getattr '%s'\n", path);
     encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
         print_e("Can't encrypt path %s\n", path);
         goto out;
     }
-    printf("encrypted_path = %s\n", encrypted_path);
+    print_d("encrypted_path = %s\n", encrypted_path);
 
     rc = stat(encrypted_path, &cs);
     if (rc) {
@@ -546,7 +546,7 @@ static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     int rc = -1;
 
 
-    printf("fs_readdir %s\n", path);
+    print_d("fs_readdir %s\n", path);
 
     encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
@@ -594,9 +594,9 @@ static int fs_open(const char *path, struct fuse_file_info *fi)
     char *encrypted_path;
     int rc = -1;
 
-    printf("fi->flags = 0x%x\n", fi->flags);
+    print_d("fi->flags = 0x%x\n", fi->flags);
 
-    printf("fs_open path = %s\n", path);
+    print_d("fs_open path = %s\n", path);
     encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
         print_e("Can't encrypt path %s\n", path);
@@ -657,11 +657,11 @@ static int fs_release(const char *path, struct fuse_file_info *fi)
 {
     struct opened_file *of = (struct opened_file *)fi->fh;
     int rc = 0;
-    printf("fs_release %s\n", path);
+    print_d("fs_release %s\n", path);
 
     if (((fi->flags & O_WRONLY) || (fi->flags & O_RDWR)) &&
            (of->fsize != of->file_header->fsize)) {
-        printf("call update_file_header, fsize = %jd\n", of->fsize);
+        print_d("call update_file_header, fsize = %jd\n", of->fsize);
         rc = update_file_header(of, of->fsize);
         if (rc)
             print_e("Can't update file header\n");
@@ -671,7 +671,7 @@ static int fs_release(const char *path, struct fuse_file_info *fi)
         off_t blocks = of->fsize / DATA_FILE_BLOCK_LEN;
         off_t len = HEADER_FILE_LEN +
                 blocks * DATA_FILE_BLOCK_LEN;
-        printf("truncate file %s to len: %jd\n",
+        print_d("truncate file %s to len: %jd\n",
                of->encrypted_path, len);
         rc = truncate(of->encrypted_path, len);
         if (!rc)
@@ -690,21 +690,21 @@ static int fs_read(const char *path, char *buf,
     struct opened_file *of = (struct opened_file *)fi->fh;
     int rc;
     off_t block_num;
-    struct buf *data_block;
+    struct buf *data_block = NULL;
     uint available_block_data_len;
     uint part_size, block_offset;
     int read_size = -1;
     off_t fpos_block_num;
     uint fpos_block_offset;
 
-    printf("fs_read %s, offset = %jd, size = %zd\n", path, offset, size);
+    print_d("fs_read %s, offset = %jd, size = %zd\n", path, offset, size);
 
     fpos_block_num = offset / DATA_FILE_BLOCK_LEN;
     fpos_block_offset = offset - (fpos_block_num * DATA_FILE_BLOCK_LEN);
 
-    printf("fpos_block_num = %jd\n", fpos_block_num);
-    printf("fpos_block_offset = %d\n", fpos_block_offset);
-    printf("of->fsize = %jd\n", of->fsize);
+    print_d("fpos_block_num = %jd\n", fpos_block_num);
+    print_d("fpos_block_offset = %d\n", fpos_block_offset);
+    print_d("of->fsize = %jd\n", of->fsize);
 
     available_block_data_len = DATA_FILE_BLOCK_LEN - fpos_block_offset;
 
@@ -713,7 +713,7 @@ static int fs_read(const char *path, char *buf,
         goto out;
     }
 
-    printf("loading data block %jd\n", fpos_block_num);
+    print_d("loading data block %jd\n", fpos_block_num);
     data_block = load_data_block(of, fpos_block_num);
     if (!data_block) {
         print_e("Can't load data block\n");
@@ -725,23 +725,23 @@ static int fs_read(const char *path, char *buf,
     read_size = 0;
     block_num = fpos_block_num;
 
-    printf("available_block_data_len = %d\n", available_block_data_len);
-    printf("part_size = %d\n", part_size);
-    printf("block_offset = %d\n", block_offset);
+    print_d("available_block_data_len = %d\n", available_block_data_len);
+    print_d("part_size = %d\n", part_size);
+    print_d("block_offset = %d\n", block_offset);
 
-    printf("! while !\n");
+    print_d("! while !\n");
     while (size > 0) {
         bool load_next_block_flag = FALSE;
-        printf("do: \n");
+        print_d("do: \n");
 
-        printf("load_data_block, block_num = %jd\n", block_num);
+        print_d("load_data_block, block_num = %jd\n", block_num);
         data_block = load_data_block(of, block_num++);
         if (!data_block) {
-            printf("Can't load data block number %jd\n", block_num - 1);
+            print_d("Can't load data block number %jd\n", block_num - 1);
             break;
         }
 
-        printf("memcpy read_size = %d, block_offset = %d, part_size = %d\n",
+        print_d("memcpy read_size = %d, block_offset = %d, part_size = %d\n",
                 read_size, block_offset, part_size);
 
         memcpy(buf + read_size,
@@ -757,14 +757,17 @@ static int fs_read(const char *path, char *buf,
         if ((offset + read_size) < of->fsize)
             load_next_block_flag = TRUE;
 
-        printf("load_next_block_flag = %d\n", load_next_block_flag);
+        print_d("load_next_block_flag = %d\n", load_next_block_flag);
         part_size = size < DATA_FILE_BLOCK_LEN ?
                     size : DATA_FILE_BLOCK_LEN;
-        printf("part_size = %d\n", part_size);
-    }
-    printf("! end while !\n");
+        print_d("part_size = %d\n", part_size);
 
-    printf("read_size = %d\n", read_size);
+        if (!load_next_block_flag)
+            break;
+    }
+    print_d("! end while !\n");
+
+    print_d("read_size = %d\n", read_size);
 out:
     kmem_deref(&data_block);
     return read_size;
@@ -786,28 +789,28 @@ static int fs_write(const char *path, const char *buf,
     off_t fpos_block_num, last_block;
     uint fpos_block_offset;
 
-    printf("fs_write %s, offset = %jd, size = %zd\n", path, offset, size);
+    print_d("fs_write %s, offset = %jd, size = %zd\n", path, offset, size);
 
     fpos_block_num = offset / DATA_FILE_BLOCK_LEN;
     fpos_block_offset = offset - (fpos_block_num * DATA_FILE_BLOCK_LEN);
     last_block = (of->fsize - 1) / DATA_FILE_BLOCK_LEN;
 
-    printf("fpos_block_num = %jd\n", fpos_block_num);
-    printf("fpos_block_offset = %d\n", fpos_block_offset);
-    printf("last_block  = %jd\n", last_block);
-    printf("of->fsize = %jd\n", of->fsize);
+    print_d("fpos_block_num = %jd\n", fpos_block_num);
+    print_d("fpos_block_offset = %d\n", fpos_block_offset);
+    print_d("last_block  = %jd\n", last_block);
+    print_d("of->fsize = %jd\n", of->fsize);
 
     free_block_space = DATA_FILE_BLOCK_LEN - fpos_block_offset;
 
     if (of->fsize && (fpos_block_num <= last_block)) {
-        printf("loading data block %jd\n", fpos_block_num);
+        print_d("loading data block %jd\n", fpos_block_num);
         data_block = load_data_block(of, fpos_block_num);
         if (!data_block) {
             print_e("Can't load data block\n");
             goto out;
         }
     } else {
-        printf("alloc new data block\n");
+        print_d("alloc new data block\n");
         data_block = bufz_alloc(DATA_FILE_BLOCK_LEN);
         if (!data_block) {
             print_e("Can't alloc for new data block\n");
@@ -820,26 +823,26 @@ static int fs_write(const char *path, const char *buf,
     wrote_size = 0;
     block_num = fpos_block_num;
 
-    printf("free_block_space = %d\n", free_block_space);
-    printf("part_size = %d\n", part_size);
-    printf("block_offset = %d\n", block_offset);
+    print_d("free_block_space = %d\n", free_block_space);
+    print_d("part_size = %d\n", part_size);
+    print_d("block_offset = %d\n", block_offset);
 
-    printf("! while !\n");
+    print_d("! while !\n");
     while (size > 0) {
         bool load_next_block_flag = FALSE;
-        printf("do: \n");
+        print_d("do: \n");
 
-        printf("memcpy block_offset = %d, wrote_size = %d, part_size = %d\n",
+        print_d("memcpy block_offset = %d, wrote_size = %d, part_size = %d\n",
                 block_offset, wrote_size, part_size);
         memcpy(data_block->data + block_offset,
                buf + wrote_size, part_size);
         size -= part_size;
         wrote_size += part_size;
 
-        printf("save_data_block, block_num = %jd\n", block_num);
+        print_d("save_data_block, block_num = %jd\n", block_num);
         rc = save_data_block(of, block_num++, data_block);
         if (rc) {
-            printf("Can't save data block number %jd\n", block_num - 1);
+            print_d("Can't save data block number %jd\n", block_num - 1);
             break;
         }
 
@@ -855,17 +858,17 @@ static int fs_write(const char *path, const char *buf,
                 load_next_block_flag = FALSE;
         }
 
-        printf("load_next_block_flag = %d\n", load_next_block_flag);
+        print_d("load_next_block_flag = %d\n", load_next_block_flag);
 
         if (load_next_block_flag) {
-            printf("load next block number %jd\n", block_num);
+            print_d("load next block number %jd\n", block_num);
             data_block = load_data_block(of, block_num);
             if (!data_block) {
-                printf("Can't load data block %jd\n", block_num);
+                print_d("Can't load data block %jd\n", block_num);
                 goto out;
             }
         } else {
-            printf("allocate for next block\n");
+            print_d("allocate for next block\n");
             data_block = bufz_alloc(DATA_FILE_BLOCK_LEN);
             if (!data_block) {
                 print_e("Can't alloc for new data block\n");
@@ -874,9 +877,9 @@ static int fs_write(const char *path, const char *buf,
         }
         part_size = size < DATA_FILE_BLOCK_LEN ?
                     size : DATA_FILE_BLOCK_LEN;
-        printf("part_size = %d\n", part_size);
+        print_d("part_size = %d\n", part_size);
     }
-    printf("! end while !\n");
+    print_d("! end while !\n");
 
     new_size = (offset + wrote_size) > of->fsize ?
                (offset + wrote_size) : of->fsize;
@@ -885,7 +888,7 @@ static int fs_write(const char *path, const char *buf,
             (offset + wrote_size) > of->fsize) {
         new_size = offset + wrote_size;
     }
-    printf("new_size = %jd\n", new_size);
+    print_d("new_size = %jd\n", new_size);
     of->fsize = new_size;
 
 out:
@@ -900,7 +903,7 @@ static int fs_mkdir(const char* path, mode_t mode)
                            fuse_get_context()->private_data;
     char *encrypted_path;
     int rc = -1;
-    printf("fs_mkdir %s\n", path);
+    print_d("fs_mkdir %s\n", path);
 
     encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
@@ -926,7 +929,7 @@ static int fs_mknod(const char* path, mode_t mode, dev_t dev)
     char *encrypted_path;
     int rc = -1;
     int fd;
-    printf("fs_mknod %s\n", path);
+    print_d("fs_mknod %s\n", path);
 
     encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
@@ -973,7 +976,7 @@ static int fs_rename(const char* old, const char* new)
                            fuse_get_context()->private_data;
     char *encrypted_old, *encrypted_new;
     int rc = -1;
-    printf("fs_rename %s to %s\n", old, new);
+    print_d("fs_rename %s to %s\n", old, new);
 
     encrypted_old = encrypt_path(cfs, old, cfs->folder);
     if (!encrypted_old) {
@@ -1003,7 +1006,7 @@ static int fs_rmdir(const char* path)
                            fuse_get_context()->private_data;
     char *encrypted_path;
     int rc = -1;
-    printf("fs_rmdir %s\n", path);
+    print_d("fs_rmdir %s\n", path);
 
     encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
@@ -1026,7 +1029,7 @@ static int fs_unlink(const char* path)
                            fuse_get_context()->private_data;
     char *encrypted_path;
     int rc = -1;
-    printf("fs_unlink %s\n", path);
+    print_d("fs_unlink %s\n", path);
 
     encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
@@ -1049,7 +1052,7 @@ static int fs_chmod(const char *path, mode_t mode)
                            fuse_get_context()->private_data;
     char *encrypted_path;
     int rc = -1;
-    printf("fs_chmod %s\n", path);
+    print_d("fs_chmod %s\n", path);
 
     encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
@@ -1072,7 +1075,7 @@ static int fs_chown(const char *path, uid_t uid, gid_t gid)
                            fuse_get_context()->private_data;
     char *encrypted_path;
     int rc = -1;
-    printf("fs_chown %s\n", path);
+    print_d("fs_chown %s\n", path);
 
     encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
@@ -1095,7 +1098,7 @@ static int fs_link(const char *from, const char *to)
                            fuse_get_context()->private_data;
     char *encrypted_from, *encrypted_to;
     int rc = -1;
-    printf("fs_link %s to %s\n", from, to);
+    print_d("fs_link %s to %s\n", from, to);
 
     encrypted_from = encrypt_path(cfs, from, cfs->folder);
     if (!encrypted_from) {
@@ -1125,7 +1128,7 @@ static int fs_symlink(const char *from, const char *to)
                            fuse_get_context()->private_data;
     char *encrypted_from, *encrypted_to;
     int rc = -1;
-    printf("fs_symlink %s to %s\n", from, to);
+    print_d("fs_symlink %s to %s\n", from, to);
     return 0;
 }
 
@@ -1136,7 +1139,7 @@ static int fs_statfs(const char *path, struct statvfs *stbuf)
                            fuse_get_context()->private_data;
     char *encrypted_path;
     int rc = -1;
-    printf("fs_statfs %s\n", path);
+    print_d("fs_statfs %s\n", path);
 
     encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
@@ -1159,7 +1162,7 @@ static int fs_readlink(const char *path, char *buf, size_t size)
                            fuse_get_context()->private_data;
     char *encrypted_path;
     int rc = -1;
-    printf("fs_readlink %s\n", path);
+    print_d("fs_readlink %s\n", path);
 
     encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
@@ -1176,41 +1179,92 @@ out:
 }
 
 
-static int fs_truncate(const char *path, off_t size)
+static int fs_truncate(const char *path, off_t new_size)
 {
-    struct cryptfs *cfs = (struct cryptfs *)
-                           fuse_get_context()->private_data;
-    char *encrypted_path;
-    struct file_header_format *file_header;
+    struct opened_file *of = NULL;
+    off_t blocks_cnt, new_blocks_cnt, append_blocks_cnt, i;
+    struct fuse_file_info fi;
+    struct cryptfs *cfs;
+    struct le *le;
     int rc = -1;
-    off_t blocks, len;
-    printf("fs_truncate %s\n", path);
+    print_d("fs_truncate %s\n", path);
 
-    encrypted_path = encrypt_path(cfs, path, cfs->folder);
-    if (!encrypted_path) {
-        print_e("Can't encrypt path %s\n", path);
+    memset(&fi, 0, sizeof fi);
+    rc = fs_open(path, &fi);
+    if (rc) {
+        print_e("Can't open file %s\n", path);
+        goto out;
+    }
+    of = (struct opened_file *)fi.fh;
+    cfs = of->cfs;
+
+    if (of->fsize == new_size) {
+        rc = 0;
         goto out;
     }
 
-    file_header = read_file_header(encrypted_path,
-                                   cfs->key_file->data_key);
-    if (!file_header) {
-        print_e("Can't read file header %s\n", encrypted_path);
+    blocks_cnt = of->fsize / DATA_FILE_BLOCK_LEN;
+    if (!blocks_cnt && of->fsize)
+        blocks_cnt = 1;
+
+    new_blocks_cnt = new_size / DATA_FILE_BLOCK_LEN;
+    if (!new_blocks_cnt && new_size)
+        new_blocks_cnt = 1;
+
+    print_d("blocks_cnt = %jd\n", blocks_cnt);
+    print_d("new_blocks_cnt = %jd\n", new_blocks_cnt);
+
+    if (new_blocks_cnt <= blocks_cnt) {
+        rc = truncate(of->encrypted_path,
+                      HEADER_FILE_LEN +
+                      new_blocks_cnt * DATA_FILE_BLOCK_LEN);
+        if (rc)
+            rc = -errno;
+    }
+
+    if (blocks_cnt == new_blocks_cnt) {
+        rc = update_file_header(of, new_size);
+        if (rc)
+            print_e("Can't update file header %s\n", path);
+
         goto out;
     }
 
-    // TODO: needs to change size. This code doesn't work.
+    /* if new_blocks_cnt > blocks_cnt */
+    append_blocks_cnt = new_blocks_cnt - blocks_cnt;
+    for (i = 0; i < append_blocks_cnt; i++) {
+        struct buf *block = bufz_alloc(DATA_FILE_BLOCK_LEN);
+        if (!block) {
+            rc = -1;
+            print_e("Can't alloc for new block\n");
+            goto out;
+        }
 
-    blocks = file_header->fsize / DATA_FILE_BLOCK_LEN;
-    len = HEADER_FILE_LEN + (blocks + 1) * DATA_FILE_BLOCK_LEN;
-    printf("truncate file %s to len: %jd\n", encrypted_path, len);
-    rc = truncate(encrypted_path, len);
+        rc = save_data_block(of, blocks_cnt + i, block);
+        kmem_deref(&block);
+        if (rc) {
+            print_e("Can't save new block\n");
+            goto out;
+        }
+    }
+
+    rc = update_file_header(of, new_size);
     if (rc)
-        rc = -errno;
+        print_e("Can't update file header %s\n", path);
+
     rc = 0;
 out:
-    kmem_deref(&file_header);
-    kmem_deref(&encrypted_path);
+    if (!of)
+        return rc;
+
+    /* Update fsize for all descriptors for current truncated file */
+    LIST_FOREACH(cfs->opened_files, le) {
+        struct opened_file *of_item = list_ledata(le);
+        if (strcmp(of_item->file_path, of->file_path) == 0)
+            of_item->fsize = new_size;
+    }
+
+    kmem_deref(&of);
     return rc;
 }
 
@@ -1221,7 +1275,7 @@ static int fs_utime(const char *path, struct utimbuf *time)
                            fuse_get_context()->private_data;
     char *encrypted_path;
     int rc = -1;
-    printf("fs_utime %s\n", path);
+    print_d("fs_utime %s\n", path);
 
     encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
@@ -1359,14 +1413,14 @@ int cryptfs_mount(struct cryptfs *cfs, char *mount_point_folder, char *password)
 
     cfs->fc = fuse_mount(mount_point_folder, &fuse_args);
     if (!cfs->fc) {
-        printf("fuse_mount error\n");
+        print_d("fuse_mount error\n");
         goto out;
     }
 
     cfs->fuse = fuse_new(cfs->fc, &fuse_args, &fs_operations,
                          sizeof fs_operations, cfs);
     if (!cfs->fuse) {
-        printf("fuse_new error\n");
+        print_d("fuse_new error\n");
         goto out;
     }
 
