@@ -1,6 +1,6 @@
 #ifndef _CRYPTFS_H
 #define _CRYPTFS_H
-
+#include "kref_alloc.h"
 
 struct cryptfs {
     char *keys_file_name;
@@ -33,7 +33,7 @@ struct cryptfs {
 
 #define DATA_FILE_KEY_LEN 64
 #define DATA_FILE_TWEAK_LEN 16
-#define DATA_FILE_BLOCK_LEN 16 // Needs 4096
+#define DATA_FILE_BLOCK_LEN 4096 // Needs 4096
 
 struct file_header_format {
     u8 tweak[DATA_FILE_TWEAK_LEN];
