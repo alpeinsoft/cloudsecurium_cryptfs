@@ -57,10 +57,10 @@ void opened_file_destructor(void *mem)
 static struct file_header_format *
 read_file_header(char *filename, struct buf *key)
 {
-    struct buf *tag;
-    struct buf *header_data_enc;
-    struct buf *header_data;
-    struct buf *iv;
+    struct buf *tag = NULL;
+    struct buf *header_data_enc = NULL;
+    struct buf *header_data = NULL;
+    struct buf *iv = NULL;
     struct file_header_format *file_header = NULL;
     uint len;
     int rc;
@@ -135,9 +135,9 @@ static int
 write_file_header(int fd, struct file_header_format *file_header,
                   struct buf *key)
 {
-    struct buf *header_data_enc;
-    struct buf *header_data;
-    struct buf *tag, *iv;
+    struct buf *header_data_enc = NULL;
+    struct buf *header_data = NULL;
+    struct buf *tag = NULL, *iv = NULL;
     uint len;
     int rc = -1;
 
@@ -209,8 +209,8 @@ static int update_file_header(struct opened_file *of, uint new_size)
 static struct buf *load_data_block(struct opened_file *of,
                                    off_t block_num)
 {
-    struct buf *enc_block;
-    struct buf *block;
+    struct buf *enc_block = NULL;
+    struct buf *block = NULL;
     int len;
     off_t needed_offset, offset;
 
@@ -293,11 +293,11 @@ static uint get_aligned_file_name_len(uint name_len)
 static char *decrypt_file_name(struct cryptfs *cfs,
                                char *enc_file_name)
 {
-    struct buf *enc_file_name_buf;
-    struct buf *decode_base32_enc_fname;
-    struct buf *enc_fname, *tag, *fname;
-    struct buf *iv;
-    struct buf *key;
+    struct buf *enc_file_name_buf = NULL;
+    struct buf *decode_base32_enc_fname = NULL;
+    struct buf *enc_fname = NULL, *tag = NULL, *fname = NULL;
+    struct buf *iv = NULL;
+    struct buf *key = NULL;
     u8 *p;
     int rc;
 
@@ -416,9 +416,9 @@ static char *encrypt_path(struct cryptfs *cfs,
                           const char *uncrypt_path,
                           char *path_prefix)
 {
-    struct buf *crypt_path;
-    struct list *parts;
-    struct list *crypted_parts;
+    struct buf *crypt_path = NULL;
+    struct list *parts = NULL;
+    struct list *crypted_parts = NULL;
     uint crypt_path_len;
     struct le *le;
     char *p;
@@ -540,7 +540,7 @@ static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 {
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
-    char *encrypted_path;
+    char *encrypted_path = NULL;
     DIR *dir;
     struct dirent *ent;
     int rc = -1;
@@ -570,7 +570,7 @@ static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
         name = decrypt_file_name(cfs, ent->d_name);
         if (!name) {
-            print_e("Can't decrypt file\n");
+            print_e("Can't decrypt file name %s\n", ent->d_name);
             continue;
         }
         filler(buf, name, NULL, 0);
@@ -589,9 +589,9 @@ static int fs_open(const char *path, struct fuse_file_info *fi)
 {
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
-    struct opened_file *of;
-    struct buf *tweak_buf;
-    char *encrypted_path;
+    struct opened_file *of = NULL;
+    struct buf *tweak_buf = NULL;
+    char *encrypted_path = NULL;
     int rc = -1;
 
     print_d("fi->flags = 0x%x\n", fi->flags);
@@ -901,7 +901,7 @@ static int fs_mkdir(const char* path, mode_t mode)
 {
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
-    char *encrypted_path;
+    char *encrypted_path = NULL;
     int rc = -1;
     print_d("fs_mkdir %s\n", path);
 
@@ -925,8 +925,8 @@ static int fs_mknod(const char* path, mode_t mode, dev_t dev)
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
     struct file_header_format file_header;
-    struct buf *tweak;
-    char *encrypted_path;
+    struct buf *tweak = NULL;
+    char *encrypted_path = NULL;
     int rc = -1;
     int fd;
     print_d("fs_mknod %s\n", path);
@@ -974,7 +974,7 @@ static int fs_rename(const char* old, const char* new)
 {
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
-    char *encrypted_old, *encrypted_new;
+    char *encrypted_old = NULL, *encrypted_new = NULL;
     int rc = -1;
     print_d("fs_rename %s to %s\n", old, new);
 
@@ -1004,7 +1004,7 @@ static int fs_rmdir(const char* path)
 {
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
-    char *encrypted_path;
+    char *encrypted_path = NULL;
     int rc = -1;
     print_d("fs_rmdir %s\n", path);
 
@@ -1027,7 +1027,7 @@ static int fs_unlink(const char* path)
 {
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
-    char *encrypted_path;
+    char *encrypted_path = NULL;
     int rc = -1;
     print_d("fs_unlink %s\n", path);
 
@@ -1050,7 +1050,7 @@ static int fs_chmod(const char *path, mode_t mode)
 {
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
-    char *encrypted_path;
+    char *encrypted_path = NULL;
     int rc = -1;
     print_d("fs_chmod %s\n", path);
 
@@ -1073,7 +1073,7 @@ static int fs_chown(const char *path, uid_t uid, gid_t gid)
 {
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
-    char *encrypted_path;
+    char *encrypted_path = NULL;
     int rc = -1;
     print_d("fs_chown %s\n", path);
 
@@ -1096,7 +1096,7 @@ static int fs_link(const char *from, const char *to)
 {
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
-    char *encrypted_from, *encrypted_to;
+    char *encrypted_from = NULL, *encrypted_to = NULL;
     int rc = -1;
     print_d("fs_link %s to %s\n", from, to);
 
@@ -1126,10 +1126,24 @@ static int fs_symlink(const char *from, const char *to)
 {
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
-    char *encrypted_from, *encrypted_to;
+    char *encrypted_path_to = NULL;
     int rc = -1;
     print_d("fs_symlink %s to %s\n", from, to);
-    return 0;
+
+    encrypted_path_to = encrypt_path(cfs, to, cfs->folder);
+    if (!encrypted_path_to) {
+        print_e("Can't encrypt path %s\n", encrypted_path_to);
+        goto out;
+    }
+
+    // TODO: Needs to support uncrypted symlink.
+    // This feature is not worked correctly
+    rc = symlink(from, encrypted_path_to);
+    if (rc == -1)
+            return -errno;
+out:
+    kmem_deref(&encrypted_path_to);
+    return rc;
 }
 
 
@@ -1137,7 +1151,7 @@ static int fs_statfs(const char *path, struct statvfs *stbuf)
 {
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
-    char *encrypted_path;
+    char *encrypted_path = NULL;
     int rc = -1;
     print_d("fs_statfs %s\n", path);
 
@@ -1160,7 +1174,7 @@ static int fs_readlink(const char *path, char *buf, size_t size)
 {
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
-    char *encrypted_path;
+    char *encrypted_path = NULL;
     int rc = -1;
     print_d("fs_readlink %s\n", path);
 
@@ -1273,7 +1287,7 @@ static int fs_utime(const char *path, struct utimbuf *time)
 {
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
-    char *encrypted_path;
+    char *encrypted_path = NULL;
     int rc = -1;
     print_d("fs_utime %s\n", path);
 
@@ -1363,8 +1377,8 @@ out:
 
 int cryptfs_mount(struct cryptfs *cfs, char *mount_point_folder, char *password)
 {
-    struct buf *key_file_key;
-    struct buf *pass;
+    struct buf *key_file_key = NULL;
+    struct buf *pass = NULL;
     struct fuse_args fuse_args = FUSE_ARGS_INIT(0, NULL);
     int rc = -1;
 
@@ -1448,8 +1462,8 @@ void cryptfs_loop(struct cryptfs *cfs)
 
 int cryptfs_generate_key_file(char *password, char *filename)
 {
-    struct buf *key;
-    struct buf *pass;
+    struct buf *key = NULL;
+    struct buf *pass = NULL;
     struct key_file key_file;
     int rc = -1;
 

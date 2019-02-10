@@ -8,7 +8,7 @@
 #define COMMON_H_
 
 #define print_e(format, ...) { \
-    fprintf(stderr, "%s +%d, %s(): ", __FILE__, __LINE__, __FUNCTION__); \
+    fprintf(stderr, "%s +%d, %s() Error: ", __FILE__, __LINE__, __FUNCTION__); \
     fprintf(stderr, (format), ##__VA_ARGS__); \
 }
 
