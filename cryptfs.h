@@ -3,14 +3,14 @@
 #include "kref_alloc.h"
 
 struct cryptfs {
-    char *keys_file_name;
+    const char *keys_file_name;
 
     struct key_file *key_file;
     struct buf *header_key;
     struct buf *file_name_key;
 
-    char *folder;
-    char *mount_point_folder;
+    const char *folder;
+    const char *mount_point_folder;
     struct fuse_chan *fc;
     struct fuse *fuse;
 
