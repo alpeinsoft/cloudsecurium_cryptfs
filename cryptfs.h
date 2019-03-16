@@ -40,10 +40,10 @@ struct file_header_format {
     off_t fsize;
 };
 
-struct cryptfs *cryptfs_create(char *crypted_folder, char *keys_file_name);
-int cryptfs_mount(struct cryptfs *cryptfs, char *mount_point_path, char *password);
+struct cryptfs *cryptfs_create(const char *crypted_folder, const char *keys_file_name);
+int cryptfs_mount(struct cryptfs *cryptfs, const char *mount_point_path, const char *password);
 int cryptfs_ummount(struct cryptfs *cryptfs);
 void cryptfs_loop(struct cryptfs *cryptfs);
-int cryptfs_generate_key_file(char *password, char *filename);
+int cryptfs_generate_key_file(const char *password, const char *filename);
 
 #endif // _CRYPTFS_H

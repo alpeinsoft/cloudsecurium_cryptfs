@@ -731,7 +731,7 @@ static int fs_read(const char *path, char *buf,
 
     print_d("! while !\n");
     while (size > 0) {
-        bool load_next_block_flag = FALSE;
+        BOOL load_next_block_flag = FALSE;
         print_d("do: \n");
 
         print_d("load_data_block, block_num = %jd\n", block_num);
@@ -829,7 +829,7 @@ static int fs_write(const char *path, const char *buf,
 
     print_d("! while !\n");
     while (size > 0) {
-        bool load_next_block_flag = FALSE;
+        BOOL load_next_block_flag = FALSE;
         print_d("do: \n");
 
         print_d("memcpy block_offset = %d, wrote_size = %d, part_size = %d\n",
@@ -1330,7 +1330,7 @@ static struct fuse_operations fs_operations =
 };
 
 
-struct cryptfs *cryptfs_create(char *crypted_folder, char *keys_file_name)
+struct cryptfs *cryptfs_create(const char *crypted_folder, const char *keys_file_name)
 {
     struct cryptfs *cfs;
 
@@ -1375,7 +1375,7 @@ out:
 }
 
 
-int cryptfs_mount(struct cryptfs *cfs, char *mount_point_folder, char *password)
+int cryptfs_mount(struct cryptfs *cfs, const char *mount_point_folder, const char *password)
 {
     struct buf *key_file_key = NULL;
     struct buf *pass = NULL;
@@ -1460,7 +1460,7 @@ void cryptfs_loop(struct cryptfs *cfs)
     fuse_loop(cfs->fuse);
 }
 
-int cryptfs_generate_key_file(char *password, char *filename)
+int cryptfs_generate_key_file(const char *password, const char *filename)
 {
     struct buf *key = NULL;
     struct buf *pass = NULL;
@@ -1503,4 +1503,3 @@ out:
     buf_deref(&key_file.file_iv);
     return rc;
 }
-
