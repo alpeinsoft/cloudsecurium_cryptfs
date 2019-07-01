@@ -186,7 +186,7 @@ static void aes256xts_destructor(void *mem)
 
 struct aes256xts *crypher_aes256xts_create(struct buf *key,
                                            struct buf *tweak,
-                                           bool enc_dec)
+                                           BOOL enc_dec)
 {
     struct aes256xts *coder;
     EVP_CIPHER_CTX *c;
@@ -501,7 +501,7 @@ struct buf *base32_decode_buf(struct buf *in)
 
 struct buf *make_rand_buf(uint len)
 {
-    static bool first = 1;
+    static BOOL first = 1;
     struct buf *buf;
     uint i;
 

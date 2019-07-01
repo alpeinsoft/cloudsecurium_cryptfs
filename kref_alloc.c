@@ -282,13 +282,13 @@ char *kref_sprintf(const char *fmt, ...)
 char *kref_strdub(const char *src)
 {
     char *dst;
-    int len = strlen(src);
-    if (len <= 0)
+    uint len = (uint)strlen(src);
+    if (len == 0)
         return NULL;
-    dst = kref_alloc(len, NULL);
+    dst = kref_alloc(len + 1, NULL);
     if (!dst)
         return NULL;
-    memcpy(dst, src, len);
+    memcpy(dst, src, len + 1);
     return dst;
 }
 

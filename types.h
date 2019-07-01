@@ -5,7 +5,7 @@
 
 typedef unsigned char u8;
 typedef unsigned int u32;
-typedef u8 bool;
+typedef u8 BOOL;
 typedef u8 byte;
 typedef unsigned int uint;
 typedef unsigned long ulong;

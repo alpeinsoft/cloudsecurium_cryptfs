@@ -14,7 +14,7 @@ int crypher_aes256gcm_decrypt(struct buf *src, struct buf **dst,
 
 struct aes256xts *crypher_aes256xts_create(struct buf *key,
                                            struct buf *tweak,
-                                           bool enc_dec);
+                                           BOOL enc_dec);
 
 struct buf *crypher_aes256xts_encrypt(struct aes256xts *encoder,
                                       struct buf *src,
