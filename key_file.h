@@ -8,11 +8,11 @@ struct key_file {
     struct buf *file_iv;
 };
 
-int key_file_load(char *filename, struct buf *key,
+int key_file_load(const char *filename, struct buf *key,
                   struct key_file **new_key_file);
 
 int key_file_save(struct key_file *key_file,
-                  char *filename, struct buf *key);
+                  const char *filename, struct buf *key);
 
 struct key_file *key_file_container_create();
 

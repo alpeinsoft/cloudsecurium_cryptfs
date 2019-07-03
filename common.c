@@ -2,7 +2,7 @@
 #include <sys/stat.h>
 #include "common.h"
 
-int dir_exist(char *path)
+int dir_exist(const char *path)
 {
     struct stat s;
     int rc;
@@ -12,7 +12,7 @@ int dir_exist(char *path)
     return (s.st_mode & S_IFDIR) && 1;
 }
 
-int file_exist(char *path)
+int file_exist(const char *path)
 {
     struct stat s;
     int rc;
@@ -22,7 +22,7 @@ int file_exist(char *path)
     return (s.st_mode & S_IFREG) && 1;
 }
 
-struct buf *file_get_contents(char *filename)
+struct buf *file_get_contents(const char *filename)
 {
     int fsize = 0;
     int len;
@@ -66,7 +66,7 @@ err:
     return NULL;
 }
 
-int file_put_contents(char *filename, struct buf *buf)
+int file_put_contents(const char *filename, struct buf *buf)
 {
     FILE *fp;
     char *p;

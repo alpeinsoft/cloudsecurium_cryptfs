@@ -416,7 +416,7 @@ err:
 
 static char *encrypt_path(struct cryptfs *cfs,
                           const char *uncrypt_path,
-                          char *path_prefix)
+                          const char *path_prefix)
 {
     struct buf *crypt_path = NULL;
     struct list *parts = NULL;
@@ -735,6 +735,7 @@ static int fs_read(const char *path, char *buf,
     uint fpos_block_offset;
 
     print_d("--- fs_read %s, offset = %jd, size = %zd\n", path, offset, size);
+//    return -1;
 
     if (offset >= of->fsize)
         offset = of->fsize;
@@ -775,7 +776,7 @@ static int fs_read(const char *path, char *buf,
 
     print_d("! while !\n");
     while (size > 0) {
-        BOOL load_next_block_flag = FALSE;
+        bool load_next_block_flag = FALSE;
         print_d("do: \n");
 
         print_d("load_data_block, block_num = %jd\n", block_num);
@@ -876,7 +877,7 @@ static int fs_write(const char *path, const char *buf,
 
     print_d("! while !\n");
     while (size > 0) {
-        BOOL load_next_block_flag = FALSE;
+        bool load_next_block_flag = FALSE;
         print_d("do: \n");
 
         print_d("memcpy block_offset = %d, wrote_size = %d, part_size = %d\n",
@@ -1516,21 +1517,70 @@ static int fs_fallocate(const char *path, int a, off_t s, off_t s2,
     return 0;
 }
 
-static int fs_write_buf(const char *path, struct fuse_bufvec *buf, off_t off,
+static int fs_write_buf(const char *path, struct fuse_bufvec *bufvec, off_t offset,
               struct fuse_file_info *fi)
 {
-    print_d("call fs_write_buf %s\n", path);
-    return 0;
+    size_t bufsize = fuse_buf_size(bufvec);
+    struct fuse_bufvec tmp = FUSE_BUFVEC_INIT(bufsize);
+    void *mem;
+    int rc;
+
+    print_d("call fs_write_buf %s, offset = %ld\n", path, offset);
+
+    mem = malloc(bufsize);
+    if (!mem)
+        return -ENOMEM;
+    tmp.buf[0].mem = mem;
+
+    rc = fuse_buf_copy(&tmp, bufvec, 0);
+    if (rc <= 0)
+        return -1;
+
+    print_d("call fs_write\n");
+
+    return fs_write(path, mem, bufsize, offset, fi);
+/*
+    size_t write_size, total_write_size = 0;
+    print_d("bufvec->count = %ld\n", bufvec->count);
+    print_d("bufvec->idx = %ld\n", bufvec->idx);
+    print_d("bufvec->off = %ld\n", bufvec->off);
+
+    for (i = bufvec->idx; i < bufvec->count; i++) {
+        struct fuse_buf *fbuf = bufvec->buf + i;
+        print_d("fbuf->size = %ld\n", fbuf->size);
+        write_size = fs_write(path, (u8*)fbuf->mem + bufvec->off,
+                               fbuf->size, offset, fi);
+        offset += write_size;
+        total_write_size += write_size;
+    }
+    return write_size;*/
 }
 
 
 static int fs_read_buf(const char *path, struct fuse_bufvec **bufp,
-                       size_t size, off_t off, struct fuse_file_info *fi)
+                       size_t size, off_t offset, struct fuse_file_info *fi)
 {
-    static struct fuse_bufvec buf = FUSE_BUFVEC_INIT(10000);
-    print_d("call fs_read_buf %s\n", path);
-    *bufp = &buf;
-    return 0;
+    struct fuse_bufvec *bufvec;
+    void *mem;
+
+    print_d("call fs_read_buf %s, offset = %ld\n", path, offset);
+
+    bufvec = malloc(sizeof(struct fuse_bufvec));
+    if (bufvec == NULL)
+            return -ENOMEM;
+
+    *bufvec = FUSE_BUFVEC_INIT(size);
+    bufvec->buf[0].flags = 0;
+    bufvec->buf[0].fd = 0;
+    bufvec->buf[0].pos = 0;
+    mem = bufvec->buf[0].mem;
+
+    mem = malloc(size);
+    if (!mem)
+        return -ENOMEM;
+
+    *bufp = bufvec;
+    return fs_read(path, mem, size, offset, fi);
 }
 
 
@@ -1576,8 +1626,8 @@ static struct fuse_operations fs_operations =
     .flock      = fs_flock,
     .fallocate  = fs_fallocate,
 
-    .write_buf  = fs_write_buf,
-    .read_buf   = fs_read_buf,
+//    .write_buf  = fs_write_buf,
+//    .read_buf   = fs_read_buf,
 };
 
 

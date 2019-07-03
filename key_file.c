@@ -19,7 +19,7 @@ struct key_file_uncrypt_format {
     u8 file_iv[FILE_NAME_IV_LEN];
 };
 
-int key_file_load(char *filename, struct buf *key,
+int key_file_load(const char *filename, struct buf *key,
                   struct key_file **new_key_file)
 {
     struct buf *file_data, *tag;
@@ -86,7 +86,7 @@ out:
 }
 
 int key_file_save(struct key_file *key_file,
-                  char *filename, struct buf *key)
+                  const char *filename, struct buf *key)
 {
     struct buf *iv_buf;
     struct buf *encrypt_file_data, *tag;

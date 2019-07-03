@@ -50,7 +50,7 @@ static inline void *list_ledata(const struct le *le)
 }
 
 
-static inline BOOL list_isempty(const struct list *list)
+static inline bool list_isempty(const struct list *list)
 {
     return list ? list->head == NULL : TRUE;
 }

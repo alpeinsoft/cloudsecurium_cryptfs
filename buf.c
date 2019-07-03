@@ -23,7 +23,7 @@ struct buf *buf_alloc(uint size)
     return buf;
 }
 
-struct buf *buf_strdub(char *str)
+struct buf *buf_strdub(const char *str)
 {
     uint len = strlen(str) + 1;
     struct buf *buf = buf_alloc(len);
@@ -51,7 +51,7 @@ void *buf_concatenate(struct buf *b1, struct buf *b2)
 }
 
 
-void buf_dump(struct buf *buf, char *name)
+void buf_dump(struct buf *buf, const char *name)
 {
     uint cnt = 0;
     uint row_cnt, col_cnt, row_len;

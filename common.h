@@ -33,10 +33,10 @@ static inline void print_backtrace()
 }
 
 
-int dir_exist(char *path);
-int file_exist(char *path);
-struct buf *file_get_contents(char *filename);
-int file_put_contents(char *filename, struct buf *buf);
+int dir_exist(const char *path);
+int file_exist(const char *path);
+struct buf *file_get_contents(const char *filename);
+int file_put_contents(const char *filename, struct buf *buf);
 struct list *str_split(const char *path, char sep);
 
 #endif /* COMMON_H_ */
