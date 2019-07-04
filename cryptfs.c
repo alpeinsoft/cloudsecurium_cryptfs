@@ -42,6 +42,7 @@ struct opened_file {
     off_t fsize;
     struct aes256xts *encrypher;
     struct aes256xts *decrypher;
+    struct fuse_file_info *fi;
 };
 
 void opened_file_destructor(void *mem)
@@ -322,6 +323,11 @@ static char *decrypt_file_name(struct cryptfs *cfs,
         goto out;
     }
 
+    if (decode_base32_enc_fname->len < FILE_NAME_TAG_LEN) {
+        print_e("Decrypted file name is short\n");
+        goto out;
+    }
+
     p = decode_base32_enc_fname->data;
     tag = buf_cpy(p, FILE_NAME_TAG_LEN);
     if (!tag) {
@@ -485,6 +491,48 @@ err:
 
 
 
+static int fs_flush(const char *path, struct fuse_file_info *fi)
+{
+    struct opened_file *of = (struct opened_file *)fi->fh;
+    struct cryptfs *cfs = of->cfs;
+    struct le *le;
+    int rc = 0;
+
+    print_d("call fs_flush %s\n", path);
+
+    if (((fi->flags & O_WRONLY) || (fi->flags & O_RDWR)) &&
+           (of->fsize != of->file_header->fsize)) {
+        print_d("call update_file_header, fsize = %jd\n", of->fsize);
+        rc = update_file_header(of, of->fsize);
+        if (rc)
+            print_e("Can't update file header\n");
+    }
+
+    if (fi->flags & O_TRUNC) {
+        off_t blocks = of->fsize / DATA_FILE_BLOCK_LEN;
+        off_t len = HEADER_FILE_LEN +
+                blocks * DATA_FILE_BLOCK_LEN;
+        print_d("truncate file %s to len: %jd\n",
+               of->encrypted_path, len);
+        rc = truncate(of->encrypted_path, len);
+        if (!rc)
+            print_e("Can't truncate file %s\n", of->encrypted_path);
+    }
+
+    /** Update info into another opened file descriptors */
+    LIST_FOREACH(cfs->opened_files, le) {
+        struct opened_file *rest_of = list_ledata(le);
+        if (strcmp(rest_of->encrypted_path, of->encrypted_path) != 0)
+            continue;
+        memcmp(rest_of->file_header, of->file_header,
+               sizeof (struct file_header_format));
+        rest_of->fsize = of->fsize;
+    }
+
+    return rc;
+}
+
+
 static int fs_getattr(const char *path, struct stat *st)
 {
     struct cryptfs *cfs = (struct cryptfs *)
@@ -494,6 +542,7 @@ static int fs_getattr(const char *path, struct stat *st)
     struct file_header_format *file_header;
     int rc = -1;
     print_d("call fs_getattr '%s'\n", path);
+
     encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
         print_e("Can't encrypt path %s\n", path);
@@ -508,14 +557,28 @@ static int fs_getattr(const char *path, struct stat *st)
     }
 
     if (cs.st_mode & S_IFREG) {
-        file_header = read_file_header(encrypted_path,
-                                       cfs->key_file->data_key);
-        if (!file_header) {
-            print_e("Can't got header file: %s\n", encrypted_path);
-            rc = -ENOENT;
-            goto out;
+        /* find currently file in opened files */
+        struct le *le;
+        bool found = FALSE;
+        LIST_FOREACH(cfs->opened_files, le) {
+            struct opened_file *rest_of = list_ledata(le);
+            if (strcmp(rest_of->encrypted_path, encrypted_path) == 0) {
+                st->st_size = rest_of->fsize;
+                found = TRUE;
+                break;
+            }
         }
-        st->st_size = file_header->fsize;
+
+        if (!found) {
+            file_header = read_file_header(encrypted_path,
+                                           cfs->key_file->data_key);
+            if (!file_header) {
+                print_e("Can't got header file: %s\n", encrypted_path);
+                rc = -ENOENT;
+                goto out;
+            }
+            st->st_size = file_header->fsize;
+        }
     }
 
     st->st_uid = cs.st_uid;
@@ -543,7 +606,7 @@ static int fs_fgetattr(const char *path, struct stat *st, struct fuse_file_info 
     struct stat cs;
     struct file_header_format *file_header;
     int rc = -1;
-    print_d("call fs_fgetattr '%s'\n", path);
+    print_d("call fs_fgetattr '%s', size = %ld\n", path, of->fsize);
 
     rc = fstat(of->fd, &cs);
     if (rc) {
@@ -582,7 +645,6 @@ static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     struct dirent *ent;
     int rc = -1;
 
-
     print_d("fs_readdir %s\n", path);
 
     encrypted_path = encrypt_path(cfs, path, cfs->folder);
@@ -599,11 +661,16 @@ static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
     while ((ent = readdir(dir)) != NULL) {
         char *name;
+
         if (strcmp(ent->d_name, ".") == 0 ||
             strcmp(ent->d_name, "..") == 0) {
             filler(buf, ent->d_name, NULL, 0);
             continue;
         }
+
+        /** skip file names starting with dot; */
+        if (ent->d_name[0] == '.')
+            continue;
 
         name = decrypt_file_name(cfs, ent->d_name);
         if (!name) {
@@ -680,6 +747,8 @@ static int fs_open(const char *path, struct fuse_file_info *fi)
         goto out;
     }
 
+    of->fi = fi;
+
     list_append(cfs->opened_files, &of->le, kmem_ref(of));
     rc = 0;
 out:
@@ -695,26 +764,6 @@ static int fs_release(const char *path, struct fuse_file_info *fi)
     struct opened_file *of = (struct opened_file *)fi->fh;
     int rc = 0;
     print_d("fs_release %s\n", path);
-
-    if (((fi->flags & O_WRONLY) || (fi->flags & O_RDWR)) &&
-           (of->fsize != of->file_header->fsize)) {
-        print_d("call update_file_header, fsize = %jd\n", of->fsize);
-        rc = update_file_header(of, of->fsize);
-        if (rc)
-            print_e("Can't update file header\n");
-    }
-
-    if (fi->flags & O_TRUNC) {
-        off_t blocks = of->fsize / DATA_FILE_BLOCK_LEN;
-        off_t len = HEADER_FILE_LEN +
-                blocks * DATA_FILE_BLOCK_LEN;
-        print_d("truncate file %s to len: %jd\n",
-               of->encrypted_path, len);
-        rc = truncate(of->encrypted_path, len);
-        if (!rc)
-            print_e("Can't truncate file %s\n", of->encrypted_path);
-    }
-
     kmem_deref(&of);
     return 0;
 }
@@ -826,6 +875,8 @@ static int fs_write(const char *path, const char *buf,
                     struct fuse_file_info *fi)
 {
     struct opened_file *of = (struct opened_file *)fi->fh;
+    struct cryptfs *cfs = of->cfs;
+    struct le *le;
     int rc;
     off_t block_num;
     off_t new_size;
@@ -943,6 +994,13 @@ static int fs_write(const char *path, const char *buf,
     }
     print_d("new_size = %jd\n", new_size);
     of->fsize = new_size;
+
+    /* Synchronize all opened files with new file size */
+    LIST_FOREACH(cfs->opened_files, le) {
+        struct opened_file *rest_of = list_ledata(le);
+        if (strcmp(rest_of->encrypted_path, of->encrypted_path) == 0)
+            rest_of->fsize = of->fsize;
+    }
 
 out:
     kmem_deref(&data_block);
@@ -1362,48 +1420,56 @@ out:
 }
 
 
-static int fs_getdir(const char *path, fuse_dirh_t a , fuse_dirfil_t b)
-{
-    print_d("call fs_getdir %s\n", path);
-    return -1;
-}
-
-static int fs_flush(const char *path, struct fuse_file_info *fi)
-{
-    struct opened_file *of = (struct opened_file *)fi->fh;
-    int rc;
-
-    print_d("call fs_flush\n");
-
-    if ((!(fi->flags & O_WRONLY) && !(fi->flags & O_RDWR)) &&
-           (of->fsize == of->file_header->fsize))
-        return 0;
-
-    rc = update_file_header(of, of->fsize);
-    if (rc) {
-        print_e("Can't update file header\n");
-        rc = -1;
-    }
-    return rc;
-}
-
 static int fs_fsync(const char *path, int a, struct fuse_file_info *fi)
 {
     struct opened_file *of = (struct opened_file *)fi->fh;
-    print_d("call fs_fsync\n");
-    return fsync(of->fd);
+    struct cryptfs *cfs = of->cfs;
+    struct le *le;
+    int rc, ret = 0;
+
+    print_d("call fs_fsync %s\n", path);
+    LIST_FOREACH(cfs->opened_files, le) {
+        struct opened_file *rest_of = list_ledata(le);
+        rc = fs_flush(rest_of->file_path, rest_of->fi);
+        if (rc) {
+            print_e("Can't flush file %s\n", rest_of->encrypted_path);
+            ret = rc;
+        }
+
+        rc = fsync(rest_of->fd);
+        if (rc)
+            ret = rc;
+    }
+
+    return ret;
 }
 
 
 /** Set extended attributes */
-static int fs_setxattr(const char *path, const char *a, const char *b, size_t size, int d)
+static int fs_setxattr(const char *path, const char *name,
+                       const char *value, size_t size, int flags)
 {
-    print_d("call fs_setxattr\n");
-    return 0;
+    struct cryptfs *cfs = (struct cryptfs *)
+                           fuse_get_context()->private_data;
+    char *encrypted_path = NULL;
+    int rc = -1;
+    print_d("fs_setxattr %s, name = %s, value=%s\n", path, name, value);
+
+    encrypted_path = encrypt_path(cfs, path, cfs->folder);
+    if (!encrypted_path) {
+        print_e("Can't encrypt path %s\n", path);
+        goto out;
+    }
+
+    rc = setxattr(encrypted_path, name, value, size, flags);
+out:
+    kmem_deref(&encrypted_path);
+    return rc;
 }
 
 /** Get extended attributes */
-static int fs_getxattr(const char *path, const char *name, char *value, size_t size)
+static int fs_getxattr(const char *path, const char *name,
+                       char *value, size_t size)
 {
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
@@ -1419,42 +1485,9 @@ static int fs_getxattr(const char *path, const char *name, char *value, size_t s
 
     rc = getxattr(encrypted_path, name, value, size);
     print_d("value = %s\n", value);
-    print_d("rc = %d\n", rc);
 out:
     kmem_deref(&encrypted_path);
     return rc;
-}
-
-/** List extended attributes */
-static int fs_listxattr(const char *path, char *a, size_t size)
-{
-    print_d("call fs_listxattr\n");
-    return 0;
-}
-
-/** Remove extended attributes */
-static int fs_removexattr(const char *path, const char *a)
-{
-    print_d("call fs_removexattr\n");
-    return 0;
-}
-
-static int fs_opendir(const char *path, struct fuse_file_info *fi)
-{
-    print_d("call fs_opendir %s\n", path);
-    return 0;
-}
-
-static int fs_releasedir(const char *path, struct fuse_file_info *fi)
-{
-    print_d("call fs_releasedir %s\n", path);
-    return 0;
-}
-
-static int fs_fsyncdir(const char *path, int a, struct fuse_file_info *fi)
-{
-    print_d("call fs_fsyncdir %s\n", path);
-    return 0;
 }
 
 static int fs_access(const char *path, int permission)
@@ -1486,103 +1519,6 @@ static int fs_lock(const char *path, struct fuse_file_info *fi,
     return flock(of->fd, cmd);
 }
 
-static int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
-{
-    print_d("call fs_create %s\n", path);
-    return 0;
-}
-
-static int fs_ftruncate(const char *path, off_t size, struct fuse_file_info *fi)
-{
-    print_d("call fs_ftruncate %s\n", path);
-    return 0;
-}
-
-static int fs_utimens(const char *path, const struct timespec tv[2])
-{
-    print_d("call fs_utimens %s\n", path);
-    return 0;
-}
-
-static int fs_flock(const char *path, struct fuse_file_info *fi, int op)
-{
-    print_d("call fs_flock %s\n", path);
-    return 0;
-}
-
-static int fs_fallocate(const char *path, int a, off_t s, off_t s2,
-              struct fuse_file_info *fi)
-{
-    print_d("call fs_fallocate %s\n", path);
-    return 0;
-}
-
-static int fs_write_buf(const char *path, struct fuse_bufvec *bufvec, off_t offset,
-              struct fuse_file_info *fi)
-{
-    size_t bufsize = fuse_buf_size(bufvec);
-    struct fuse_bufvec tmp = FUSE_BUFVEC_INIT(bufsize);
-    void *mem;
-    int rc;
-
-    print_d("call fs_write_buf %s, offset = %ld\n", path, offset);
-
-    mem = malloc(bufsize);
-    if (!mem)
-        return -ENOMEM;
-    tmp.buf[0].mem = mem;
-
-    rc = fuse_buf_copy(&tmp, bufvec, 0);
-    if (rc <= 0)
-        return -1;
-
-    print_d("call fs_write\n");
-
-    return fs_write(path, mem, bufsize, offset, fi);
-/*
-    size_t write_size, total_write_size = 0;
-    print_d("bufvec->count = %ld\n", bufvec->count);
-    print_d("bufvec->idx = %ld\n", bufvec->idx);
-    print_d("bufvec->off = %ld\n", bufvec->off);
-
-    for (i = bufvec->idx; i < bufvec->count; i++) {
-        struct fuse_buf *fbuf = bufvec->buf + i;
-        print_d("fbuf->size = %ld\n", fbuf->size);
-        write_size = fs_write(path, (u8*)fbuf->mem + bufvec->off,
-                               fbuf->size, offset, fi);
-        offset += write_size;
-        total_write_size += write_size;
-    }
-    return write_size;*/
-}
-
-
-static int fs_read_buf(const char *path, struct fuse_bufvec **bufp,
-                       size_t size, off_t offset, struct fuse_file_info *fi)
-{
-    struct fuse_bufvec *bufvec;
-    void *mem;
-
-    print_d("call fs_read_buf %s, offset = %ld\n", path, offset);
-
-    bufvec = malloc(sizeof(struct fuse_bufvec));
-    if (bufvec == NULL)
-            return -ENOMEM;
-
-    *bufvec = FUSE_BUFVEC_INIT(size);
-    bufvec->buf[0].flags = 0;
-    bufvec->buf[0].fd = 0;
-    bufvec->buf[0].pos = 0;
-    mem = bufvec->buf[0].mem;
-
-    mem = malloc(size);
-    if (!mem)
-        return -ENOMEM;
-
-    *bufp = bufvec;
-    return fs_read(path, mem, size, offset, fi);
-}
-
 
 static struct fuse_operations fs_operations =
 {
@@ -1607,27 +1543,13 @@ static struct fuse_operations fs_operations =
     .truncate   = fs_truncate,
     .utime      = fs_utime,
 
-    .getdir     = fs_getdir,
     .flush      = fs_flush,
     .fsync      = fs_fsync,
     .setxattr   = fs_setxattr,
     .getxattr   = fs_getxattr,
-    .listxattr  = fs_listxattr,
-    .removexattr = fs_removexattr,
-
-    .opendir    = fs_opendir,
-    .releasedir = fs_releasedir,
-    .fsyncdir   = fs_fsyncdir,
 
     .access     = fs_access,
     .lock       = fs_lock,
-    .ftruncate  = fs_ftruncate,
-    .utimens    = fs_utimens,
-    .flock      = fs_flock,
-    .fallocate  = fs_fallocate,
-
-//    .write_buf  = fs_write_buf,
-//    .read_buf   = fs_read_buf,
 };
 
 
