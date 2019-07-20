@@ -1726,3 +1726,8 @@ out:
     buf_deref(&key_file.file_iv);
     return rc;
 }
+
+void cryptfs_free(struct cryptfs* cfs)
+{
+    kmem_deref(&cfs);
+}

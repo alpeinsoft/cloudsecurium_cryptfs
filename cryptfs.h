@@ -45,5 +45,6 @@ int cryptfs_mount(struct cryptfs *cryptfs, const char *mount_point_path, const c
 int cryptfs_ummount(struct cryptfs *cryptfs);
 void cryptfs_loop(struct cryptfs *cryptfs);
 int cryptfs_generate_key_file(const char *password, const char *filename);
+void cryptfs_free(struct cryptfs *cfs);
 
 #endif // _CRYPTFS_H
