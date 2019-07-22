@@ -500,8 +500,7 @@ static int fs_flush(const char *path, struct fuse_file_info *fi)
 
     print_d("call fs_flush %s\n", path);
 
-    if (((fi->flags & O_WRONLY) || (fi->flags & O_RDWR)) &&
-           (of->fsize != of->file_header->fsize)) {
+    if (of->fsize != of->file_header->fsize) {
         print_d("call update_file_header, fsize = %jd\n", of->fsize);
         rc = update_file_header(of, of->fsize);
         if (rc)
