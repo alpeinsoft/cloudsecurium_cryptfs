@@ -49,6 +49,7 @@ static void k_destructor(struct kref *kref)
 }
 
 
+#ifdef linux
 /**
  * fls - find last (most-significant) bit set
  * @x: the word to search
@@ -84,7 +85,9 @@ static inline int fls(int x)
         }
         return r;
 }
-
+#else
+#include <strings.h>
+#endif
 
 /**
  * Allocate aligned memory
@@ -101,9 +104,10 @@ void *kref_alloc_aligned(int size, uint align, void (*destructor)(void *mem))
     u8 shift;
 
     /* fixed align value if incorrect */
-    shift = (fls(align) - 1);
-    align = 1 << shift;
-
+    if (align) {
+        shift = (fls(align) - 1);
+        align = 1 << shift;
+    }
     ptr = malloc(sizeof(struct kralloc) + size + align);
     if (!ptr)
         return ptr;

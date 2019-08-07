@@ -6,8 +6,14 @@
 #include <fcntl.h>
 #include <sys/xattr.h>
 #include <sys/file.h>
+
+#include <libgen.h>
+#include <string.h>
+
 #ifdef __APPLE__
     #include <osxfuse/fuse.h>
+    #include <libgen.h>
+    #include <string.h>
 #else
     #include <fuse.h>
 #endif
@@ -466,7 +472,7 @@ static char *encrypt_path(struct cryptfs *cfs,
         goto err;
     }
 
-    p = crypt_path->data;
+    p = (char *)crypt_path->data;
     memcpy(p, path_prefix, path_prefix_len);
     p += path_prefix_len;
     if (path_prefix[path_prefix_len - 1] == '/')
@@ -480,7 +486,7 @@ static char *encrypt_path(struct cryptfs *cfs,
     }
 
     *p = 0;
-    crypt_path->len = strlen(crypt_path->data);
+    crypt_path->len = strlen((const char *)crypt_path->data);
     buf_ref(crypt_path);
 err:
     buf_deref(&crypt_path);
@@ -1046,21 +1052,12 @@ static int fs_mknod(const char* path, mode_t mode, dev_t dev)
         print_e("Can't encrypt path %s\n", path);
         goto out;
     }
-
-    rc = mknod(encrypted_path, mode, dev);
-    if (rc) {
-        rc = -errno;
-        goto out;
-    }
-
-    /* create and write file header */
-    fd = open(encrypted_path, O_WRONLY);
+    fd = creat(encrypted_path, mode);
     if (fd < 0) {
         rc = -errno;
         print_e("can't open %s for create file header\n", encrypted_path);
         goto out;
     }
-
     tweak = make_rand_buf(DATA_FILE_TWEAK_LEN);
     file_header.fsize = 0;
     memcpy(&file_header.tweak, tweak->data, tweak->len);
@@ -1444,6 +1441,7 @@ static int fs_fsync(const char *path, int a, struct fuse_file_info *fi)
 }
 
 
+#ifndef __APPLE__
 /** Set extended attributes */
 static int fs_setxattr(const char *path, const char *name,
                        const char *value, size_t size, int flags)
@@ -1488,6 +1486,7 @@ out:
     kmem_deref(&encrypted_path);
     return rc;
 }
+#endif
 
 static int fs_access(const char *path, int permission)
 {
@@ -1544,9 +1543,10 @@ static struct fuse_operations fs_operations =
 
     .flush      = fs_flush,
     .fsync      = fs_fsync,
+#ifndef __APPLE__
     .setxattr   = fs_setxattr,
     .getxattr   = fs_getxattr,
-
+#endif
     .access     = fs_access,
     .lock       = fs_lock,
 };
@@ -1602,6 +1602,17 @@ int cryptfs_mount(struct cryptfs *cfs, const char *mount_point_folder, const cha
     struct buf *key_file_key = NULL;
     struct buf *pass = NULL;
     struct fuse_args fuse_args = FUSE_ARGS_INIT(0, NULL);
+
+
+#ifdef __APPLE__
+    char *name = basename(mount_point_folder);
+    char *volname = malloc(strlen(name)+strlen("volname=")+1);
+    sprintf(volname, "volname=%s", name);
+    fuse_opt_add_arg(&fuse_args, volname);
+    free(volname);
+    fuse_opt_add_arg(&fuse_args, "local");
+    fuse_opt_add_arg(&fuse_args, "iconpath=/Library/Filesystems/osxfuse.fs/Contents/Resources/Volume.icns");
+#endif
     int rc = -1;
 
     pass = buf_strdub(password);
@@ -1652,7 +1663,6 @@ int cryptfs_mount(struct cryptfs *cfs, const char *mount_point_folder, const cha
         print_d("fuse_mount error\n");
         goto out;
     }
-
     cfs->fuse = fuse_new(cfs->fc, &fuse_args, &fs_operations,
                          sizeof fs_operations, cfs);
     if (!cfs->fuse) {

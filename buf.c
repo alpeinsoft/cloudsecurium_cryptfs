@@ -137,7 +137,7 @@ char *buf_to_str(struct buf *buf)
     if (!buf)
         return NULL;
     if (!buf->data[buf->len - 1])
-        return buf->data;
+        return (char *)buf->data;
 
     str = kref_alloc(buf->len + 1, NULL);
     if (!str)

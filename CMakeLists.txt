@@ -34,9 +34,18 @@ add_library(${PROJECT_NAME} SHARED ${cryptfs_SRCS})
 target_link_libraries(${PROJECT_NAME}
     OpenSSL::Crypto
     OpenSSL::SSL
-    fuse
     m
 )
+
+if(APPLE)
+    target_link_libraries(${PROJECT_NAME}
+        osxfuse
+        )
+else()
+    target_link_libraries(${PROJECT_NAME}
+        fuse
+        )
+endif()
 
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
 
