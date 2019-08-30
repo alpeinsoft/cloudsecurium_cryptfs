@@ -73,7 +73,6 @@ int file_put_contents(const char *filename, struct buf *buf)
     int rc;
     uint len;
     uint dsize = buf->len;
-
     fp = fopen(filename, "w");
     if(!fp) {
         print_e("Can't open file %s for write\n", filename);
