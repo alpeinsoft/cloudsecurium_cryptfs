@@ -1737,13 +1737,20 @@ int cryptfs_ummount(struct cryptfs *cfs)
 {
     print_d("in unmount\n");
 #ifdef __APPLE__
-    fuse_exit(cfs->fuse);
-    fuse_unmount(cfs->mount_point_folder, cfs->fc);
-    /*void* ptr = kref_sprintf("umount -f %s", cfs->mount_point_folder);
+    //fuse_exit(cfs->fuse);
+    //fuse_unmount(cfs->mount_point_folder, cfs->fc);
+    void* ptr = kref_sprintf("umount -f %s", cfs->mount_point_folder);
     //int rc = unmount(cfs->mount_point_folder, 0);
     int rc = system(ptr);
     print_e("osx unmount %d\n", rc);
-    kmem_deref(&ptr);*/
+    kmem_deref(&ptr);
+
+    struct fuse_session *fs = fuse_get_session(cfs->fuse);
+    struct fuse_chan *ch = fuse_session_next_chan(fs, NULL);
+    fuse_session_remove_chan(ch);
+    fuse_destroy(cfs->fuse);
+    fuse_unmount(cfs->mount_point_folder, ch);
+    //fuse_opt_free_args(&args);
 #else
     fuse_unmount(cfs->mount_point_folder, cfs->fc);
 #endif
