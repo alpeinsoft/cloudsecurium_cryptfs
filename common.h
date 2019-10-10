@@ -8,9 +8,9 @@
 #define COMMON_H_
 #define CRYPTFS_OSX_DEBUG
 
-#ifdef __apple__
+#ifdef __APPLE__
     #define print_e(format, ...) do { \
-        FILE* foo = fopen("/Users/user/log", "a"); \
+        FILE* foo = fopen("/Users/user/cs_log_err", "a"); \
         fprintf(stderr, "%s +%d, %s() Error: ", __FILE__, __LINE__, __FUNCTION__); \
         fprintf(stderr, (format), ##__VA_ARGS__); \
         fclose(foo); \
@@ -24,10 +24,20 @@
 
 #define CRYTPFS_DEBUG
 #ifdef CRYTPFS_DEBUG
-    #define print_d(format, ...) { \
-        fprintf(stdout, "%s +%d, %s(): ", __FILE__, __LINE__, __FUNCTION__); \
-        fprintf(stdout, (format), ##__VA_ARGS__); \
-    }
+    #ifdef __APPLE__
+        #include <unistd.h>
+        #define print_d(format, ...) do { \
+            FILE* foo = fopen("/Users/user/cs_log_debug", "a"); \
+            fprintf(foo, "%s +%d, %s(): ", __FILE__, __LINE__, __FUNCTION__); \
+            fprintf(foo, (format), ##__VA_ARGS__); \
+            fclose(foo); \
+        } while(0)
+    #else
+        #define print_d(format, ...) do { \
+            fprintf(stdout, "%s +%d, %s(): ", __FILE__, __LINE__, __FUNCTION__); \
+            fprintf(stdout, (format), ##__VA_ARGS__); \
+        } while(0)
+    #endif
 #else
     #define print_d(format, ...)
 #endif

@@ -31,6 +31,7 @@
 static void cryptfs_destructor(void *mem)
 {
     struct cryptfs *cfs = (struct cryptfs *)mem;
+    print_d("in cryptfs_destructor\n");
     kmem_deref(&cfs->keys_file_name);
     kmem_deref(&cfs->key_file);
     kmem_deref(&cfs->header_key);
@@ -38,6 +39,7 @@ static void cryptfs_destructor(void *mem)
     kmem_deref(&cfs->folder);
     kmem_deref(&cfs->mount_point_folder);
     kmem_deref(&cfs->opened_files);
+    print_d("after cryptfs_destructor\n");
 }
 
 struct opened_file {
@@ -1648,11 +1650,12 @@ int cryptfs_mount(struct cryptfs *cfs, const char *mount_point_folder, const cha
     struct buf *key_file_key = NULL;
     struct buf *pass = NULL;
 #ifdef __APPLE__
-    void* ptr = kref_sprintf("volname=%s,local,allow_other,remember=0", "UNCRYPT");
-    char *argv[] = {"test", "-o", ptr, NULL};
+    char *mount_point = strdup(mount_point_folder);
+    void* fuse_args_osx = kref_sprintf("volname=%s,local,allow_other,remember=0,noappledouble,noapplexattr", basename(mount_point));
+    print_d("mount_point name is %s\n", basename(mount_point));
+    free(mount_point);
+    char *argv[] = {"test", "-o", fuse_args_osx, NULL};
     struct fuse_args fuse_args = FUSE_ARGS_INIT(3, argv);
-    //fuse_opt_add_arg(&fuse_args, "iconpath=/Library/Filesystems/osxfuse.fs/Contents/Resources/Volume.icns");
-    //basename(mount_point_folder));
 #else
     struct fuse_args fuse_args = FUSE_ARGS_INIT(0, NULL);
 #endif
@@ -1700,13 +1703,10 @@ int cryptfs_mount(struct cryptfs *cfs, const char *mount_point_folder, const cha
     }
 
 #ifdef __APPLE__
-    fuse_unmount(mount_point_folder, NULL);
-    /*void *cmd = kref_sprintf("umount -f %s", cfs->mount_point_folder);
-    if (system(cmd)) {
-        print_d("%s return not 0\n", cmd);
-        system("mount");
-    }
-    kmem_deref(&cmd);*/
+    void *cmd = kref_sprintf("umount -f %s", cfs->mount_point_folder);
+    rc = system(cmd);
+    print_d("%s return %d\n", cmd, rc);
+    kmem_deref(&cmd);
 #else
     fuse_unmount(mount_point_folder, NULL);
 #endif
@@ -1728,7 +1728,7 @@ out:
     buf_deref(&pass);
     buf_deref(&key_file_key);
 #ifdef __APPLE__
-    kmem_deref(&ptr);
+    kmem_deref(&fuse_args_osx);
 #endif
     return rc;
 }
@@ -1737,46 +1737,27 @@ int cryptfs_ummount(struct cryptfs *cfs)
 {
     print_d("in unmount\n");
 #ifdef __APPLE__
-    //fuse_exit(cfs->fuse);
-    //fuse_unmount(cfs->mount_point_folder, cfs->fc);
-    void* ptr = kref_sprintf("umount -f %s", cfs->mount_point_folder);
-    //int rc = unmount(cfs->mount_point_folder, 0);
-    int rc = system(ptr);
-    print_e("osx unmount %d\n", rc);
-    kmem_deref(&ptr);
-
     struct fuse_session *fs = fuse_get_session(cfs->fuse);
     struct fuse_chan *ch = fuse_session_next_chan(fs, NULL);
     fuse_session_remove_chan(ch);
     fuse_destroy(cfs->fuse);
     fuse_unmount(cfs->mount_point_folder, ch);
-    //fuse_opt_free_args(&args);
 #else
     fuse_unmount(cfs->mount_point_folder, cfs->fc);
 #endif
-    print_e("after unmount\n");
-    kmem_deref(&cfs->key_file);
-    buf_deref(&cfs->header_key);
-    buf_deref(&cfs->file_name_key);
-    buf_deref(&cfs->mount_point_folder);
-    print_e("after kmem derefs\n");
     return 0;
 }
 
 void cryptfs_loop(struct cryptfs *cfs)
 {
-    print_e("in cryptfs_loop\n");
+    print_d("in cryptfs_loop\n");
     int rc = fuse_loop(cfs->fuse);
-    print_e("after cryptfs_loop\n");
-#ifdef __apple__
-    fuse_destroy(cfs->fuse);
-    print_e("after fuse_destroy\n");
-#endif
+    print_d("after cryptfs_loop\n");
 }
 
 int cryptfs_generate_key_file(const char *password, const char *filename)
 {
-    print_e("cryptfs_generate_key_file got: %s %s\n", password, filename);
+    print_d("cryptfs_generate_key_file got: %s %s\n", password, filename);
     struct buf *key = NULL;
     struct buf *pass = NULL;
     struct key_file key_file;
