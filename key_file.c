@@ -22,12 +22,12 @@ struct key_file_uncrypt_format {
 int key_file_load(const char *filename, struct buf *key,
                   struct key_file **new_key_file)
 {
-    struct buf *file_data, *tag;
-    struct buf *encrypt_file_data;
-    struct buf *uncrypt_buf;
-    struct key_file *key_file;
-    struct buf *iv_buf;
-    struct key_file_uncrypt_format *uncrypt_format;
+    struct buf *file_data = NULL, *tag = NULL;
+    struct buf *encrypt_file_data = NULL;
+    struct buf *uncrypt_buf = NULL;
+    struct key_file *key_file = NULL;
+    struct buf *iv_buf = NULL;
+    struct key_file_uncrypt_format *uncrypt_format = NULL;
     int rc = -1;
 
     file_data = file_get_contents(filename);
