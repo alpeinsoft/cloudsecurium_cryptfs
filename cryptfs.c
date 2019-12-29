@@ -4,10 +4,11 @@
 #include <time.h>
 #include <errno.h>
 #include <fcntl.h>
+#ifdef __unix__
 #include <sys/xattr.h>
 #include <sys/file.h>
-
 #include <libgen.h>
+#endif
 #include <string.h>
 
 #ifdef __APPLE__
@@ -18,15 +19,26 @@
     #include <sys/mount.h>
 #else
     #include <fuse.h>
-    #include <fuse/fuse_lowlevel.h>
 #endif
-#include <unistd.h>
+#ifdef __unix__
 #include <dirent.h>
+#include <unistd.h>
+#else
+#include "dirent.h"
+#include <winbase.h>
+#include "required_posix.h"
+#endif
 #include "kref_alloc.h"
 #include "key_file.h"
 #include "crypher.h"
 #include "cryptfs.h"
 #include "buf.h"
+
+#ifndef __unix__
+typedef struct FUSE_STAT STAT;
+#else
+typedef struct stat STAT;
+#endif
 
 static void cryptfs_destructor(void *mem)
 {
@@ -59,7 +71,11 @@ struct opened_file {
 void opened_file_destructor(void *mem)
 {
     struct opened_file *of = (struct opened_file *)mem;
+#ifdef __unix__
     close(of->fd);
+#else
+    win_close(of->fd);
+#endif
     list_unlink(&of->le);
     kmem_deref(&of->file_path);
     kmem_deref(&of->encrypted_path);
@@ -79,10 +95,14 @@ read_file_header(char *filename, struct buf *key)
     uint len;
     int rc;
     int fd;
-
+#ifdef __unix__
     fd = open(filename, O_RDONLY);
+#else
+    fd = win_open(filename, O_RDONLY);
+#endif
     if (fd < 0) {
-        print_e("can't open %s, fd = %d\n", filename, fd);
+        print_e("can't open %s, fd = %d, errno = %d\n", filename, fd, errno);
+        perror("open");
         rc = -errno;
         goto out;
     }
@@ -104,22 +124,35 @@ read_file_header(char *filename, struct buf *key)
         print_e("Can't alloc for header data\n");
         goto out;
     }
-
+#ifdef __unix__
     len = read(fd, iv->data, iv->len);
+#else
+//    len = win_read(fd, iv->data, iv->len);
+    len = win_pread(fd, iv->data, iv->len, 0);
+#endif
     if (len != iv->len) {
         print_e("Can't read iv, len = %d, iv->len = %d\n",
                 len, tag->len);
+        buf_dump(file_get_contents(filename), "file");
         goto out;
     }
-
+#ifdef __unix__
     len = read(fd, tag->data, tag->len);
+#else
+//    len = win_read(fd, tag->data, tag->len);
+    len = win_pread(fd, tag->data, tag->len, iv->len);
+#endif
     if (len != tag->len) {
         print_e("Can't read tag, len = %d, tag->len = %d\n",
                 len, tag->len);
         goto out;
     }
-
+#ifdef __unix__
     len = read(fd, header_data_enc->data, header_data_enc->len);
+#else
+    //len = win_read(fd, header_data_enc->data, header_data_enc->len);
+    len = win_pread(fd, header_data_enc->data, header_data_enc->len, tag->len+iv->len);
+#endif
     if (len != header_data_enc->len) {
         print_e("Can't read header data\n");
         goto out;
@@ -136,7 +169,11 @@ read_file_header(char *filename, struct buf *key)
     file_header = (struct file_header_format *)header_data->data;
     kmem_ref(header_data);
 out:
+#ifdef __unix__
     close(fd);
+#else
+    win_close(fd);
+#endif
     kmem_deref(&tag);
     kmem_deref(&iv);
     kmem_deref(&header_data_enc);
@@ -154,8 +191,11 @@ write_file_header(int fd, struct file_header_format *file_header,
     struct buf *tag = NULL, *iv = NULL;
     uint len;
     int rc = -1;
-
+#ifdef __unix__
     lseek(fd, 0, SEEK_SET);
+#else
+    win_lseek(fd, 0, SEEK_SET);
+#endif
 
     iv = make_rand_buf(HEADER_FILE_IV_LEN);
     if (!iv) {
@@ -175,22 +215,34 @@ write_file_header(int fd, struct file_header_format *file_header,
         print_e("Can't encrypt header_data\n");
         goto out;
     }
-
+#ifdef __unix__
     len = write(fd, iv->data, iv->len);
+#else
+    //len = win_write(fd, iv->data, iv->len);
+    len = win_pwrite(fd, iv->data, iv->len, 0);
+#endif
     if (len != iv->len) {
         print_e("Can't write IV\n");
         rc = -errno;
         goto out;
     }
-
+#ifdef __unix__
     len = write(fd, tag->data, tag->len);
+#else
+    //len = win_write(fd, tag->data, tag->len);
+    len = win_pwrite(fd, tag->data, tag->len, iv->len);
+#endif
     if (len != tag->len) {
         print_e("Can't write tag\n");
         rc = -errno;
         goto out;
     }
-
+#ifdef __unix__
     len = write(fd, header_data_enc->data, header_data_enc->len);
+#else
+    //len = win_write(fd, header_data_enc->data, header_data_enc->len);
+    len = win_pwrite(fd, header_data_enc->data, header_data_enc->len, iv->len+tag->len);
+#endif
     if (len != header_data_enc->len) {
         print_e("Can't write encrypted file header\n");
         rc = -errno;
@@ -242,16 +294,31 @@ static struct buf *load_data_block(struct opened_file *of,
     }
 
     needed_offset = block_num * DATA_FILE_BLOCK_LEN + HEADER_FILE_LEN;
+#ifdef __unix__
     offset = lseek(of->fd, needed_offset, SEEK_SET);
+#else
+    offset = win_lseek(of->fd, needed_offset, SEEK_SET);
+#endif
     if (offset != needed_offset) {
         print_e("Can't offset to needed data block\n");
         goto out;
+    } else {
+    	print_d("offset if %d\n", offset);
     }
-
+#ifdef __unix__
     len = read(of->fd, enc_block->data, enc_block->len);
+#else
+    print_d("win_read: fd=%d, enc_block->data=%p, enc_block->len=%d\n", of->fd, enc_block->data, enc_block->len);
+    struct stat foo;
+    _fstat(of->fd, &foo);
+    print_d("expected size = %d\n", foo.st_size);
+  	len = win_pread(of->fd, enc_block->data, enc_block->len, needed_offset);
+  	//win_read(of->fd, enc_block->data + len, enc_block->len - len);
+#endif
     if (len != enc_block->len) {
         print_e("Can't read data block, len = %d, enc_block->len = %d\n",
                 len, enc_block->len);
+        perror("read");
         if (len < 0)
             print_e("Read error: %s\n", strerror(errno));
         goto out;
@@ -283,9 +350,17 @@ static int save_data_block(struct opened_file *of, off_t block_num,
         print_e("Can't encrypt data block\n");
         goto out;
     }
-
+#ifdef __unix__
     lseek(of->fd, block_num * DATA_FILE_BLOCK_LEN + HEADER_FILE_LEN, SEEK_SET);
     len = write(of->fd, enc_block->data, enc_block->len);
+#else
+    len = win_pwrite(of->fd, enc_block->data, enc_block->len, block_num * DATA_FILE_BLOCK_LEN + HEADER_FILE_LEN);
+    rc = GetLastError();
+/*    rc = win_lseek(of->fd, block_num * DATA_FILE_BLOCK_LEN + HEADER_FILE_LEN, SEEK_SET);
+    print_d("%d = win_lseek(%d, %d, %d);\n", rc, of->fd, block_num * DATA_FILE_BLOCK_LEN + HEADER_FILE_LEN, SEEK_SET);
+    len = win_write(of->fd, enc_block->data, enc_block->len);
+    print_d("%d = win_write(%d, %p, %d);\n", len, of->fd, enc_block->data, enc_block->len);*/
+#endif
     if (len != enc_block->len) {
         print_e("Can't write data block\n");
         goto out;
@@ -319,6 +394,7 @@ static char *decrypt_file_name(struct cryptfs *cfs,
         print_e("incorrect args for decrypt_file_name\n");
         return NULL;
     }
+    print_d("%s\n", enc_file_name);
     iv = cfs->key_file->file_iv;
     key = cfs->file_name_key;
 
@@ -353,7 +429,6 @@ static char *decrypt_file_name(struct cryptfs *cfs,
         print_e("Can't copy encrypthed file name\n");
         goto out;
     }
-
     rc = crypher_aes256gcm_decrypt(enc_fname, &fname, tag, iv, key);
     if (rc) {
         print_e("Can't decrypt file name\n");
@@ -444,6 +519,7 @@ static char *encrypt_path(struct cryptfs *cfs,
     struct buf *iv = cfs->key_file->file_iv;
     struct buf *key = cfs->file_name_key;
     uint path_prefix_len = strlen(path_prefix);
+    char *result = NULL;
 
     parts = str_split(uncrypt_path, '/');
     if (!parts) {
@@ -492,12 +568,13 @@ static char *encrypt_path(struct cryptfs *cfs,
 
     *p = 0;
     crypt_path->len = strlen((const char *)crypt_path->data);
-    buf_ref(crypt_path);
+    result = kref_strdub((const char *)crypt_path->data);
+    //print_d("result: %s\n", result);
 err:
     buf_deref(&crypt_path);
     kmem_deref(&parts);
     kmem_deref(&crypted_parts);
-    return buf_to_str(crypt_path);
+    return result;
 }
 
 
@@ -509,22 +586,46 @@ static int fs_flush(const char *path, struct fuse_file_info *fi)
     struct le *le;
     int rc = 0;
 
-    print_d("call fs_flush %s\n", path);
-
+    print_d("call fs_flush %s \n", path);
+    print_d("of=%p\n", of);
+    print_d("*of=%p\n", *of);
+    print_d("cfs=%p\n", cfs);
+    print_d("*cfs=%p\n", *cfs);/*
+    print_d("file_header=%p\n", of->file_header);
+    print_d("fsize=%p\n", of->fsize);
+    print_d("opened file = %p\n", cfs->opened_files);
+    int found = 0;
+    struct cryptfs *test_cfs = (struct cryptfs *)
+                           fuse_get_context()->private_data;
+    LIST_FOREACH(test_cfs->opened_files, le) {
+    	struct opened_file *rest_of = list_ledata(le);
+    	print_d("compare %s %s\n", rest_of->file_path, path);
+    	if (!strcmp(rest_of->file_path, path)) {
+    		print_d("found file\n");
+    		found = 1;
+    		break;
+    	}
+    }
+    if (!found)
+    	return 0;*/
     if (of->fsize != of->file_header->fsize) {
         print_d("call update_file_header, fsize = %jd\n", of->fsize);
         rc = update_file_header(of, of->fsize);
         if (rc)
             print_e("Can't update file header\n");
     }
-
+    print_d("survived of dereferencing\n");
     if (fi->flags & O_TRUNC) {
         off_t blocks = of->fsize / DATA_FILE_BLOCK_LEN;
         off_t len = HEADER_FILE_LEN +
                 blocks * DATA_FILE_BLOCK_LEN;
-        print_d("truncate file %s to len: %jd\n",
-               of->encrypted_path, len);
+        /*print_d("truncate file %s to len: %jd\n",
+               of->encrypted_path, len);*/
+#ifdef __unix__
         rc = truncate(of->encrypted_path, len);
+#else
+        rc = win_truncate(of->encrypted_path, len);
+#endif
         if (!rc)
             print_e("Can't truncate file %s\n", of->encrypted_path);
     }
@@ -538,17 +639,19 @@ static int fs_flush(const char *path, struct fuse_file_info *fi)
                sizeof (struct file_header_format));
         rest_of->fsize = of->fsize;
     }
-
+    print_d("fs_flush %s, fd=%d\n\n", path, of->fd);
     return rc;
 }
 
-
-static int fs_getattr(const char *path, struct stat *st)
+#ifdef __unix__
+/*return it back!!!!!*/
+static int fs_getattr(const char *path, STAT *st)
 {
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
     char *encrypted_path = NULL;
-    struct stat cs;
+    STAT cs;
+
     struct file_header_format *file_header;
     int rc = -1;
     print_d("call fs_getattr '%s'\n", path);
@@ -559,13 +662,12 @@ static int fs_getattr(const char *path, struct stat *st)
         goto out;
     }
     print_d("encrypted_path = %s\n", encrypted_path);
-
     rc = stat(encrypted_path, &cs);
     if (rc) {
         rc = -ENOENT;
         goto out;
     }
-
+    print_d("after stat\n");
     if (cs.st_mode & S_IFREG) {
         /* find currently file in opened files */
         struct le *le;
@@ -590,17 +692,21 @@ static int fs_getattr(const char *path, struct stat *st)
             st->st_size = file_header->fsize;
         }
     }
-
+    print_d("after ifs\n");
     st->st_uid = cs.st_uid;
     st->st_gid = cs.st_gid;
-    st->st_atime = cs.st_atime;
-    st->st_mtime = cs.st_mtime;
+//    st->st_atim = cs.st_atime;
+  //  st->st_mtime = cs.st_mtime;
     st->st_mode = cs.st_mode;
     st->st_nlink = cs.st_nlink;
 #ifdef __APPLE__
     st->st_blksize = 0;
 #else
-    st->st_ctim = cs.st_ctim;
+    #ifdef __unix__
+        st->st_ctim = cs.st_ctim;
+    #else
+    //    st->st_ctime = cs.st_ctime;
+    #endif
 #endif
 
     rc = 0;
@@ -608,12 +714,110 @@ out:
     kmem_deref(&encrypted_path);
     return rc;
 }
+#else
+static int fs_getattr(const char *path, struct FUSE_STAT *st)
+{
+    struct cryptfs *cfs = (struct cryptfs *)
+                           fuse_get_context()->private_data;
+    char *encrypted_path = NULL;
+    struct _stat s;
 
+    struct file_header_format *file_header;
+    int rc = -1;
+    print_d("call fs_getattr '%s'\n", path);
 
-static int fs_fgetattr(const char *path, struct stat *st, struct fuse_file_info *fi)
+    encrypted_path = encrypt_path(cfs, path, cfs->folder);
+    if (!encrypted_path) {
+        print_e("Can't encrypt path %s\n", path);
+        goto out;
+    }
+    rc = _stat(encrypted_path, &s);
+    if (rc) {
+        rc = -ENOENT;
+        goto out;
+    }
+    if (s.st_mode & S_IFREG) {
+        /* find currently file in opened files */
+        struct le *le;
+        bool found = FALSE;
+        LIST_FOREACH(cfs->opened_files, le) {
+            struct opened_file *rest_of = list_ledata(le);
+            if (strcmp(rest_of->encrypted_path, encrypted_path) == 0) {
+                st->st_size = rest_of->fsize;
+                found = TRUE;
+                break;
+            }
+        }
+
+        if (!found) {
+            file_header = read_file_header(encrypted_path,
+                                           cfs->key_file->data_key);
+            if (!file_header) {
+                print_e("Can't got header file: %s\n", encrypted_path);
+                rc = -ENOENT;
+                goto out;
+            }
+            st->st_size = file_header->fsize;
+        }
+    }
+    st->st_gid = s.st_gid;
+    st->st_atim.tv_sec = s.st_atime;
+    st->st_atim.tv_nsec = 0;
+    st->st_ctim.tv_sec = s.st_ctime;
+    st->st_ctim.tv_nsec = 0;
+    st->st_dev = s.st_dev;
+    st->st_ino = s.st_ino;
+    st->st_mode = s.st_mode;
+    st->st_mtim.tv_sec = s.st_mtime;
+    st->st_mtim.tv_nsec = 0;
+    st->st_nlink = s.st_nlink;
+    st->st_rdev = s.st_rdev;
+    st->st_uid = s.st_uid;
+    rc = 0;
+out:
+	print_d("call fs_getattr %s\n\n", path);
+    kmem_deref(&encrypted_path);
+    return rc;
+}
+#endif
+
+#ifndef __unix__
+static int fs_fgetattr(const char *path, struct FUSE_STAT *st, struct fuse_file_info *fi)
 {
     struct opened_file *of = (struct opened_file *)fi->fh;
-    struct stat cs;
+    struct _stat cs;
+    struct file_header_format *file_header;
+    int rc = -1;
+    print_d("call fs_fgetattr '%s', size = %ld\n", path, of->fsize);
+    rc = _fstat(of->fd, &cs);
+    if (rc) {
+        rc = -ENOENT;
+        goto out;
+    }
+
+    if (cs.st_mode & S_IFREG)
+        st->st_size = of->fsize;
+
+    st->st_atim.tv_sec = cs.st_atime;
+    st->st_atim.tv_nsec = 0;
+    st->st_ctim.tv_sec = cs.st_ctime;
+    st->st_ctim.tv_nsec = 0;
+    st->st_mtim.tv_sec = cs.st_mtime;
+    st->st_mtim.tv_nsec = 0;
+    st->st_uid = cs.st_uid;
+    st->st_gid = cs.st_gid;
+    st->st_mode = cs.st_mode;
+    st->st_nlink = cs.st_nlink;
+
+    rc = 0;
+out:
+    return rc;
+}
+#else
+static int fs_fgetattr(const char *path, STAT *st, struct fuse_file_info *fi)
+{
+    struct opened_file *of = (struct opened_file *)fi->fh;
+    STAT cs;
     struct file_header_format *file_header;
     int rc = -1;
     print_d("call fs_fgetattr '%s', size = %ld\n", path, of->fsize);
@@ -629,21 +833,25 @@ static int fs_fgetattr(const char *path, struct stat *st, struct fuse_file_info 
 
     st->st_uid = cs.st_uid;
     st->st_gid = cs.st_gid;
-    st->st_atime = cs.st_atime;
-    st->st_mtime = cs.st_mtime;
+    //st->st_atime = cs.st_atime;
+    //st->st_mtime = cs.st_mtime;
     st->st_mode = cs.st_mode;
     st->st_nlink = cs.st_nlink;
 #ifdef __APPLE__
     st->st_blksize = 0;
 #else
-    st->st_ctim = cs.st_ctim;
+    #ifdef __unix__
+        st->st_ctim = cs.st_ctim;
+    #else
+     //   st->st_ctime = cs.st_ctime;
+    #endif
 #endif
 
     rc = 0;
 out:
     return rc;
 }
-
+#endif
 
 static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
              off_t offset, struct fuse_file_info *fi)
@@ -655,8 +863,7 @@ static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     struct dirent *ent;
     int rc = -1;
 
-    print_d("fs_readdir %s\n", path);
-
+    print_d("fs_readdir %s\n\n", path);
     encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
         print_e("Can't encrypt path %s\n", path);
@@ -681,7 +888,13 @@ static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
         /** skip file names starting with dot; */
         if (ent->d_name[0] == '.')
             continue;
+#ifndef __unix__
+        /** skip deskrop.ini on windows; */
+        if (!strcmp(ent->d_name, "desktop.ini"))
+        	continue;
+#endif
 
+        print_d("trying to decrypt: %s\n", ent->d_name);
         name = decrypt_file_name(cfs, ent->d_name);
         if (!name) {
             print_e("Can't decrypt file name %s\n", ent->d_name);
@@ -735,7 +948,7 @@ static int fs_open(const char *path, struct fuse_file_info *fi)
         goto out;
     }
     of->fsize = of->file_header->fsize;
-    print_d("of->fsize = %ld\n", of->fsize);
+    //print_d("of->fsize = %ld\n", of->fsize);
 
     tweak_buf = buf_cpy(of->file_header->tweak,
                         sizeof of->file_header->tweak);
@@ -749,8 +962,12 @@ static int fs_open(const char *path, struct fuse_file_info *fi)
 
     of->decrypher = crypher_aes256xts_create(cfs->key_file->data_key,
                                              tweak_buf, 0);
-
-    of->fd = open(of->encrypted_path, O_RDONLY | O_RDWR);
+#ifdef __unix__
+    of->fd = open(of->encrypted_path, O_RDWR);
+#else
+    of->fd = win_open(of->encrypted_path, O_RDWR);
+#endif
+    int debug_fd = of->fd;
     if (of->fd <= 0) {
         rc = -errno;
         print_e("can't open %s\n", of->encrypted_path);
@@ -758,10 +975,17 @@ static int fs_open(const char *path, struct fuse_file_info *fi)
     }
 
     of->fi = fi;
+  	list_append(cfs->opened_files, &of->le, kmem_ref(of));
+/*
+  	if (!fi->flags) {
+  		fs_release(path, fi);
+  		print_d("release file due to 0 flags\n");
+  	}
+*/
 
-    list_append(cfs->opened_files, &of->le, kmem_ref(of));
     rc = 0;
 out:
+	print_d("fs_open path=%s, fd=%d\n\n", path, debug_fd);
     kmem_deref(&of);
     kmem_deref(&encrypted_path);
     kmem_deref(&tweak_buf);
@@ -771,10 +995,11 @@ out:
 
 static int fs_release(const char *path, struct fuse_file_info *fi)
 {
+    print_d("fs_release %s\n", path);
     struct opened_file *of = (struct opened_file *)fi->fh;
     int rc = 0;
-    print_d("fs_release %s\n", path);
     kmem_deref(&of);
+    print_d("1\n");
     return 0;
 }
 
@@ -801,20 +1026,20 @@ static int fs_read(const char *path, char *buf,
 
     fpos_block_num = offset / DATA_FILE_BLOCK_LEN;
     fpos_block_offset = offset - (fpos_block_num * DATA_FILE_BLOCK_LEN);
-
+/*
     print_d("fpos_block_num = %jd\n", fpos_block_num);
     print_d("fpos_block_offset = %d\n", fpos_block_offset);
     print_d("of->fsize = %jd\n", of->fsize);
-
+*/
     available_block_data_len = DATA_FILE_BLOCK_LEN - fpos_block_offset;
 
     if (!of->fsize) {
         read_size = 0;
-        print_d("read_size = %d\n", read_size);
+        //print_d("read_size = %d\n", read_size);
         goto out;
     }
 
-    print_d("loading data block %jd\n", fpos_block_num);
+    //print_d("loading data block %jd\n", fpos_block_num);
     data_block = load_data_block(of, fpos_block_num);
     if (!data_block) {
         print_e("Can't load data block\n");
@@ -829,25 +1054,25 @@ static int fs_read(const char *path, char *buf,
     read_size = 0;
     block_num = fpos_block_num;
 
-    print_d("available_block_data_len = %d\n", available_block_data_len);
+   /* print_d("available_block_data_len = %d\n", available_block_data_len);
     print_d("part_size = %d\n", part_size);
     print_d("block_offset = %d\n", block_offset);
 
-    print_d("! while !\n");
+    print_d("! while !\n");*/
     while (size > 0) {
         bool load_next_block_flag = FALSE;
-        print_d("do: \n");
+        /*print_d("do: \n");
 
-        print_d("load_data_block, block_num = %jd\n", block_num);
+        print_d("load_data_block, block_num = %jd\n", block_num);*/
         data_block = load_data_block(of, block_num++);
         if (!data_block) {
             print_d("Can't load data block number %jd\n", block_num - 1);
             break;
         }
 
-        print_d("memcpy read_size = %d, block_offset = %d, part_size = %d\n",
+        /*print_d("memcpy read_size = %d, block_offset = %d, part_size = %d\n",
                 read_size, block_offset, part_size);
-
+*/
         memcpy(buf + read_size,
                data_block->data + block_offset,
                part_size);
@@ -856,25 +1081,26 @@ static int fs_read(const char *path, char *buf,
         size -= part_size;
         read_size += part_size;
 
-        print_d("size = %ld\n", size);
+        //print_d("size = %ld\n", size);
 
         block_offset = 0;
 
         if ((offset + read_size) < of->fsize)
             load_next_block_flag = TRUE;
 
-        print_d("load_next_block_flag = %d\n", load_next_block_flag);
+        //print_d("load_next_block_flag = %d\n", load_next_block_flag);
         part_size = size < DATA_FILE_BLOCK_LEN ?
                     size : DATA_FILE_BLOCK_LEN;
-        print_d("part_size = %d\n", part_size);
+        //print_d("part_size = %d\n", part_size);
 
         if (!load_next_block_flag)
             break;
     }
-    print_d("! end while !\n");
+/*    print_d("! end while !\n");
 
-    print_d("read_size = %d\n", read_size);
+    print_d("read_size = %d\n", read_size);*/
 out:
+	print_d("fs_read %s, fd=%d, offset = %jd, size = %zd\n\n", path, of->fd, offset, size);
     kmem_deref(&data_block);
     return read_size;
 }
@@ -897,7 +1123,7 @@ static int fs_write(const char *path, const char *buf,
     off_t fpos_block_num, last_block;
     uint fpos_block_offset;
 
-    print_d("--- fs_write %s, fsize = %ld, offset = %jd, size = %zd\n",
+    print_d("--- fs_write %s, fsize = %d, offset = %d, size = %d\n",
             path, of->fsize, offset, size);
 
     fpos_block_num = offset / DATA_FILE_BLOCK_LEN;
@@ -916,6 +1142,7 @@ static int fs_write(const char *path, const char *buf,
         data_block = load_data_block(of, fpos_block_num);
         if (!data_block) {
             print_e("Can't load data block\n");
+            perror("load_data_block");
             goto out;
         }
     } else {
@@ -1004,15 +1231,18 @@ static int fs_write(const char *path, const char *buf,
     }
     print_d("new_size = %jd\n", new_size);
     of->fsize = new_size;
-
+#ifndef __unix__
+//        print_e("win_fsync(of->fd)=%d\n", win_fsync(of->fd));
+    _flushall();
+#endif
     /* Synchronize all opened files with new file size */
     LIST_FOREACH(cfs->opened_files, le) {
         struct opened_file *rest_of = list_ledata(le);
         if (strcmp(rest_of->encrypted_path, of->encrypted_path) == 0)
             rest_of->fsize = of->fsize;
     }
-
 out:
+	print_d("fs_write %s, fd=%d, fsize = %ld, offset = %jd, size = %zd\n\n", path, of->fd, of->fsize, offset, size);
     kmem_deref(&data_block);
     return wrote_size;
 }
@@ -1028,13 +1258,18 @@ static int fs_mkdir(const char* path, mode_t mode)
 
     encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
-        print_e("Can't encrypt path %s\n", path);
+    //    print_e("Can't encrypt path %s\n", path);
         goto out;
     }
-
+#ifdef __unix__
     rc = mkdir(encrypted_path, mode);
-    if (rc)
+#else
+    rc = _mkdir(encrypted_path);
+#endif
+    if (rc) {
         rc = -errno;
+        perror("_mkdir");
+    }
 out:
     kmem_deref(&encrypted_path);
     return rc;
@@ -1057,7 +1292,11 @@ static int fs_mknod(const char* path, mode_t mode, dev_t dev)
         print_e("Can't encrypt path %s\n", path);
         goto out;
     }
+#ifdef __unix__
     fd = creat(encrypted_path, mode);
+#else
+    fd = _creat(encrypted_path, _S_IREAD | _S_IWRITE);//mode);//win_open(encrypted_path, O_CREAT | O_EXCL | O_WRONLY);
+#endif
     if (fd < 0) {
         rc = -errno;
         print_e("can't open %s for create file header\n", encrypted_path);
@@ -1069,13 +1308,18 @@ static int fs_mknod(const char* path, mode_t mode, dev_t dev)
     rc = write_file_header(fd, &file_header,
                            cfs->key_file->data_key);
     if (rc) {
-        print_e("can't write file_header in file %s\n", encrypted_path);
+        print_e("can't write file_header in file %s\n\n", encrypted_path);
         goto out;
     }
+#ifdef __unix__
     close(fd);
+#else
+    win_close(fd);
+#endif
 
     rc = 0;
 out:
+	print_d("fs_mknod %s, fd = %d\n\n", path, fd);
     kmem_deref(&tweak);
     kmem_deref(&encrypted_path);
     return rc;
@@ -1084,6 +1328,7 @@ out:
 
 static int fs_rename(const char* old, const char* new)
 {
+	struct le *le;
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
     char *encrypted_old = NULL, *encrypted_new = NULL;
@@ -1101,13 +1346,38 @@ static int fs_rename(const char* old, const char* new)
         print_e("Can't encrypt old path %s\n", new);
         goto out;
     }
-
+#ifndef __unix__
+    LIST_FOREACH(cfs->opened_files, le) {
+            struct opened_file *rest_of = list_ledata(le);
+            if (strcmp(rest_of->encrypted_path, encrypted_old) == 0)
+            	if (win_close(rest_of->fd) == -1)
+            		print_e("Can't close %d\n", rest_of->fd);
+        }
+#endif
     rc = rename(encrypted_old, encrypted_new);
-    if (rc)
+    if (rc) {
         rc = -errno;
+        print_e("Can't rename %s: ", old);
+        perror("rename");
+    }
+
+#ifndef __unix__
+    LIST_FOREACH(cfs->opened_files, le) {
+            struct opened_file *rest_of = list_ledata(le);
+            if (strcmp(rest_of->encrypted_path, encrypted_old) != 0)
+            	continue;
+
+			rest_of->fd = win_open(encrypted_new, rest_of->flags);
+			if (rest_of->fd == -1)
+				print_e("Can't reopen %s\n", encrypted_new);
+			kmem_deref(&rest_of->encrypted_path);
+			rest_of->encrypted_path = kmem_ref(encrypted_new);
+        }
+#endif
 out:
     kmem_deref(&encrypted_old);
     kmem_deref(&encrypted_new);
+    print_d("fs_rename ret=%d\n", rc);
     return rc;
 }
 
@@ -1148,8 +1418,11 @@ static int fs_unlink(const char* path)
         print_e("Can't encrypt path %s\n", path);
         goto out;
     }
-
+#ifdef __unix__
     rc = unlink(encrypted_path);
+#else
+    rc = _unlink(encrypted_path);
+#endif
     if (rc)
         rc = -errno;
 out:
@@ -1180,7 +1453,7 @@ out:
     return rc;
 }
 
-
+#ifdef __unix__
 static int fs_chown(const char *path, uid_t uid, gid_t gid)
 {
     struct cryptfs *cfs = (struct cryptfs *)
@@ -1257,7 +1530,7 @@ out:
     kmem_deref(&encrypted_path_to);
     return rc;
 }
-
+#endif
 
 static int fs_statfs(const char *path, struct statvfs *stbuf)
 {
@@ -1265,15 +1538,18 @@ static int fs_statfs(const char *path, struct statvfs *stbuf)
                            fuse_get_context()->private_data;
     char *encrypted_path = NULL;
     int rc = -1;
-    print_d("fs_statfs %s\n", path);
+    print_d("fs_statfs %s\n\n", path);
 
     encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
         print_e("Can't encrypt path %s\n", path);
         goto out;
     }
-
+#ifdef __unix__
     rc = statvfs(encrypted_path, stbuf);
+#else
+    rc = win_statvfs(encrypted_path, stbuf);
+#endif
     if (rc)
         rc = -errno;
 out:
@@ -1281,7 +1557,7 @@ out:
     return rc;
 }
 
-
+#ifdef __unix__
 static int fs_readlink(const char *path, char *buf, size_t size)
 {
     struct cryptfs *cfs = (struct cryptfs *)
@@ -1303,7 +1579,7 @@ out:
     kmem_deref(&encrypted_path);
     return rc;
 }
-
+#endif
 
 static int fs_truncate(const char *path, off_t new_size)
 {
@@ -1316,6 +1592,7 @@ static int fs_truncate(const char *path, off_t new_size)
     print_d("--- fs_truncate %s, new_size = %ld\n", path, new_size);
 
     memset(&fi, 0, sizeof fi);
+    fi.flags = O_RDWR;
     rc = fs_open(path, &fi);
     if (rc) {
         print_e("Can't open file %s\n", path);
@@ -1335,22 +1612,29 @@ static int fs_truncate(const char *path, off_t new_size)
         blocks_cnt = 1;
 
     new_blocks_cnt = new_size / DATA_FILE_BLOCK_LEN;
-    if (!new_blocks_cnt && new_size)
-        new_blocks_cnt = 1;
+    if (new_blocks_cnt*DATA_FILE_BLOCK_LEN < new_size)
+        new_blocks_cnt += 1;
 
     print_d("blocks_cnt = %jd\n", blocks_cnt);
     print_d("new_blocks_cnt = %jd\n", new_blocks_cnt);
 
     if (new_blocks_cnt <= blocks_cnt) {
+#ifdef __unix__
         rc = truncate(of->encrypted_path,
                       HEADER_FILE_LEN +
                       new_blocks_cnt * DATA_FILE_BLOCK_LEN);
-        if (rc)
-            rc = -errno;
+#else
 
+        rc = win_truncate(of->encrypted_path,
+                      HEADER_FILE_LEN +
+                      new_blocks_cnt * DATA_FILE_BLOCK_LEN);
+#endif
+        if (rc) {
+            rc = -errno;
+            perror("win_truncate");
+        }
         goto out;
     }
-
     if (blocks_cnt == new_blocks_cnt) {
         rc = update_file_header(of, new_size);
         if (rc)
@@ -1358,7 +1642,6 @@ static int fs_truncate(const char *path, off_t new_size)
 
         goto out;
     }
-
     /* if new_blocks_cnt > blocks_cnt */
     append_blocks_cnt = new_blocks_cnt - blocks_cnt;
     for (i = 0; i < append_blocks_cnt; i++) {
@@ -1376,27 +1659,34 @@ static int fs_truncate(const char *path, off_t new_size)
             goto out;
         }
     }
-
     rc = update_file_header(of, new_size);
     if (rc)
         print_e("Can't update file header %s\n", path);
-
     rc = 0;
 out:
     if (!of)
         return rc;
-
+#ifndef __unix__
+//        print_e("win_fsync(of->fd)=%d\n", win_fsync(of->fd));
+    _flushall();
+#endif
+    //print_d("making header sync in truncate\n");
     /* Update fsize for all descriptors for current truncated file */
     LIST_FOREACH(cfs->opened_files, le) {
         struct opened_file *of_item = list_ledata(le);
         if (strcmp(of_item->file_path, of->file_path) == 0)
             of_item->fsize = new_size;
     }
+    struct stat foo;
+    _stat(of->encrypted_path, &foo);
+    print_d("size of file %s after truncate: %d\n",of->encrypted_path, foo.st_size);
+    _fstat(3, &foo);
+    print_d("size of fd=3 after truncate: %d\n", foo.st_size);
 
+    print_d("fs_truncate %s, fd=%d, new_size = %ld\n\n", path, of->fd, new_size);
     kmem_deref(&of);
     return rc;
 }
-
 
 static int fs_utime(const char *path, struct utimbuf *time)
 {
@@ -1411,8 +1701,11 @@ static int fs_utime(const char *path, struct utimbuf *time)
         print_e("Can't encrypt path %s\n", path);
         goto out;
     }
-
+#ifdef __unix__
     rc = utime(encrypted_path, time);
+#else
+    rc =1;// _utime(encrypted_path, time);
+#endif
     if (rc)
         rc = -errno;
 out:
@@ -1429,6 +1722,8 @@ static int fs_fsync(const char *path, int a, struct fuse_file_info *fi)
     int rc, ret = 0;
 
     print_d("call fs_fsync %s\n", path);
+
+
     LIST_FOREACH(cfs->opened_files, le) {
         struct opened_file *rest_of = list_ledata(le);
         rc = fs_flush(rest_of->file_path, rest_of->fi);
@@ -1436,8 +1731,15 @@ static int fs_fsync(const char *path, int a, struct fuse_file_info *fi)
             print_e("Can't flush file %s\n", rest_of->encrypted_path);
             ret = rc;
         }
-
+#ifdef __unix__
         rc = fsync(rest_of->fd);
+        if (rc)
+            ret = rc;
+#else
+        rc = FlushFileBuffers(rest_of->fd);
+        if (!rc)
+        	ret = -errno;
+#endif
         if (rc)
             ret = rc;
     }
@@ -1445,7 +1747,7 @@ static int fs_fsync(const char *path, int a, struct fuse_file_info *fi)
     return ret;
 }
 
-
+#ifdef __unix__
 #ifndef __APPLE__
 /** Set extended attributes */
 static int fs_setxattr(const char *path, const char *name,
@@ -1537,6 +1839,7 @@ out:
     return rc;
 }
 #endif
+#endif
 
 static int fs_access(const char *path, int permission)
 {
@@ -1551,14 +1854,17 @@ static int fs_access(const char *path, int permission)
         print_e("Can't encrypt path %s\n", path);
         goto out;
     }
-
+#ifdef __unix__
     rc = access(encrypted_path, permission);
+#else
+    rc = _access(encrypted_path, permission);
+#endif
 out:
     kmem_deref(&encrypted_path);
     return rc;
 }
 
-
+#ifdef __unix__
 static int fs_lock(const char *path, struct fuse_file_info *fi,
                    int cmd, struct flock *fl)
 {
@@ -1566,7 +1872,7 @@ static int fs_lock(const char *path, struct fuse_file_info *fi,
     print_d("call fs_lock %s\n", path);
     return flock(of->fd, cmd);
 }
-
+#endif
 
 static struct fuse_operations fs_operations =
 {
@@ -1583,32 +1889,40 @@ static struct fuse_operations fs_operations =
     .rmdir      = fs_rmdir,
     .unlink     = fs_unlink,
     .chmod      = fs_chmod,
+#ifdef __unix__
     .chown      = fs_chown,
     .link       = fs_link,
     .symlink    = fs_symlink,
+#endif
     .statfs     = fs_statfs,
+#ifdef __unix__
     .readlink   = fs_readlink,
+#endif
     .truncate   = fs_truncate,
     .utime      = fs_utime,
 
     .flush      = fs_flush,
     .fsync      = fs_fsync,
+#ifdef __unix__
     .setxattr   = fs_setxattr,
     .getxattr   = fs_getxattr,
+#endif
     .access     = fs_access,
+#ifdef __unix__
     .lock       = fs_lock,
+#endif
 };
 
 
 struct cryptfs *cryptfs_create(const char *crypted_folder, const char *keys_file_name)
 {
-    struct cryptfs *cfs;
-
+    struct cryptfs *cfs = NULL;
+#ifdef __unix__
     if (!dir_exist(crypted_folder)) {
         print_e("folder %s is not exist\n", crypted_folder);
         goto out;
     }
-
+#endif
     if (!file_exist(keys_file_name)) {
         print_e("%s file is not exist\n", keys_file_name);
         goto out;
@@ -1657,7 +1971,12 @@ int cryptfs_mount(struct cryptfs *cfs, const char *mount_point_folder, const cha
     char *argv[] = {"test", "-o", fuse_args_osx, NULL};
     struct fuse_args fuse_args = FUSE_ARGS_INIT(3, argv);
 #else
+#ifdef __unix__
     struct fuse_args fuse_args = FUSE_ARGS_INIT(0, NULL);
+#else
+    char *argv[] = {"tst", "-s", NULL};
+    struct fuse_args fuse_args = FUSE_ARGS_INIT(2, argv);
+#endif
 #endif
     int rc = -1;
 

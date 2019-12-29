@@ -1,6 +1,12 @@
 project(cryptfs)
 set(CMAKE_AUTOMOC TRUE)
 
+if(MSVC)
+    add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+    set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
+    set(BUILD_SHARED_LIBS TRUE)
+endif()
+
 set(cryptfs_SRCS
     base32.c
     buf.c
@@ -13,6 +19,10 @@ set(cryptfs_SRCS
     list.c
 )
 
+if(MSVC)
+    list(APPEND cryptfs_SRCS dirent.c required_posix.c)
+    list(APPEND cryptfs_HEADERS dirent.h required_posix.h)
+endif()
 
 # These headers are installed for libowncloudsync to be used by 3rd party apps
 set(cryptfs_HEADERS
@@ -27,24 +37,37 @@ set(cryptfs_HEADERS
     list.h
     types.h
 )
-
 add_definitions(-O3 -D_FILE_OFFSET_BITS=64 -DFUSE_USE_VERSION=26)
 
 add_library(${PROJECT_NAME} SHARED ${cryptfs_SRCS})
 target_link_libraries(${PROJECT_NAME}
+    PRIVATE
     OpenSSL::Crypto
     OpenSSL::SSL
-    m
 )
+if(UNIX)
+    target_link_libraries(${PROJECT_NAME}
+       PRIVATE m
+    )
+endif()
 
 if(APPLE)
     target_link_libraries(${PROJECT_NAME}
-        osxfuse
+        PRIVATE osxfuse
+        )
+elseif(UNIX)
+    target_link_libraries(${PROJECT_NAME}
+        PRIVATE fuse
         )
 else()
+    include_directories("E:/windows/dokany/dokan_fuse/include")
+    link_directories("E:/windows/dokany/dokan_fuse/build/Release")
+    find_library(dokanfuse NAMES "dokanfuse1" HINTS "E:/windows/dokany/dokan_fuse/build/Release")
+    message("======================================>${dokanfuse}")
     target_link_libraries(${PROJECT_NAME}
-        fuse
+            PRIVATE ${dokanfuse}
         )
+target_link_directories(${PROJECT_NAME} PUBLIC "E:/windows/dokany/dokan_fuse/build/Release")
 endif()
 
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})

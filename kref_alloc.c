@@ -30,26 +30,30 @@ static void k_destructor(struct kref *kref)
         if(strcmp(a_root->magic, "kralloc") != 0)
             break;
     }
-
     /* free all linked memories */
     LIST_FOREACH_SAFE(&a_root->list, le, safe_le) {
         a = list_ledata(le);
         list_unlink(le);
         if (a->destructor)
             a->destructor(a + 1);
+        if (strcmp(a->magic, "kralloc") != 0) {
+            printf("no magic => no free\n");
+            break;
+        }
         strcpy(a->magic, "\0");
+//print_d("free | shift size:%d | ptr: %p\n", a->shift_size, (u8 *)a - a->shift_size);
         free((u8 *)a - a->shift_size);
     }
-
     /* free root memory */
     if (a_root->destructor)
         a_root->destructor(a_root + 1);
     strcpy(a_root->magic, "\0");
+//print_d("free %p\n", (u8 *)a_root - a_root->shift_size);
     free((u8 *)a_root - a_root->shift_size);
 }
 
 
-#ifdef linux
+#ifndef __APPLE__
 /**
  * fls - find last (most-significant) bit set
  * @x: the word to search
@@ -108,18 +112,20 @@ void *kref_alloc_aligned(int size, uint align, void (*destructor)(void *mem))
         shift = (fls(align) - 1);
         align = 1 << shift;
     }
+    //print_d("align: %d\n", align);
     ptr = malloc(sizeof(struct kralloc) + size + align);
     if (!ptr)
         return ptr;
+    //print_d("malloc %p\n", ptr);
 
-    end_ptr = ptr + sizeof(*a);
+    end_ptr = (char *)ptr + sizeof(*a);
     if (align && ((ulong)end_ptr % align))
         aligned_ptr = (void *)((((ulong)end_ptr >> shift) + 1) << shift);
     else
         aligned_ptr = end_ptr;
 
-    a = (struct kralloc *)(aligned_ptr - sizeof(*a));
-    a->shift_size = ((void *)a - ptr);
+    a = (struct kralloc *)((char *)aligned_ptr - sizeof(*a));
+    a->shift_size = ((char *)a - (char *)ptr);
     a->size = size;
     strcpy(a->magic, "kralloc");
     memset(&a->list, 0, sizeof a->list);
@@ -127,7 +133,6 @@ void *kref_alloc_aligned(int size, uint align, void (*destructor)(void *mem))
     a->destructor = destructor;
     kref_init(&a->kref);
     a->linked_mem = NULL; /* mark as root memory */
-
     return (void *)(a + 1);
 }
 
@@ -233,27 +238,21 @@ void *_kmem_deref(void **mem)
     void *m;
     if (!mem)
         return NULL;
-
     m = *mem;
-
     if (!m)
         return NULL;
-
     a = (struct kralloc *)m - 1;
-
     if(strcmp(a->magic, "kralloc") != 0)
         return NULL;
-
-    if (a->linked_mem)
+    if (a->linked_mem) {
         rc = kref_put(&a->linked_mem->kref, k_destructor);
-    else
+    } else {
         rc = kref_put(&a->kref, k_destructor);
-
+    }
     if (rc) {
         *mem = NULL;
         return NULL;
     }
-
     return m;
 }
 

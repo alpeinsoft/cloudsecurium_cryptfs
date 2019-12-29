@@ -30,7 +30,7 @@ struct buf *file_get_contents(const char *filename)
     struct buf *buf;
     u8 *p;
 
-    fp = fopen(filename, "r");
+    fp = fopen(filename, "rb");
     if(!fp) {
         print_e("Can't open file %s for read\n", filename);
         return NULL;
@@ -73,7 +73,7 @@ int file_put_contents(const char *filename, struct buf *buf)
     int rc;
     uint len;
     uint dsize = buf->len;
-    fp = fopen(filename, "w");
+    fp = fopen(filename, "wb");
     if(!fp) {
         print_e("Can't open file %s for write\n", filename);
         return -1;

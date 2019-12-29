@@ -1,5 +1,11 @@
 #ifndef _CRYPTFS_H
 #define _CRYPTFS_H
+#ifdef __cplusplus
+extern "C" {
+#endif
+#ifndef __unix__
+//	#define stat FUSE_STAT
+#endif
 #include "kref_alloc.h"
 
 struct cryptfs {
@@ -35,6 +41,9 @@ struct cryptfs {
 #define DATA_FILE_TWEAK_LEN 16
 #define DATA_FILE_BLOCK_LEN 4096 // Needs 4096
 
+#ifndef __unix__
+typedef long off_t;
+#endif
 struct file_header_format {
     u8 tweak[DATA_FILE_TWEAK_LEN];
     off_t fsize;
@@ -46,5 +55,9 @@ int cryptfs_ummount(struct cryptfs *cryptfs);
 void cryptfs_loop(struct cryptfs *cryptfs);
 int cryptfs_generate_key_file(const char *password, const char *filename);
 void cryptfs_free(struct cryptfs *cfs);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // _CRYPTFS_H

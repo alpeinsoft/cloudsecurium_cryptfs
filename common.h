@@ -1,16 +1,18 @@
 #include <stdarg.h>
-#include <execinfo.h>
+#ifndef Q_OS_WIN
+//#include <execinfo.h>
+#endif
 #include "types.h"
 #include "buf.h"
 #include "list.h"
 
 #ifndef COMMON_H_
 #define COMMON_H_
-#define CRYPTFS_OSX_DEBUG
+//#define CRYPTFS_OSX_DEBUG
 
-#ifdef __APPLE__
+#if defined(__APPLE__) && defined(CRYPTFS_OSX_DEBUG)
     #define print_e(format, ...) do { \
-        FILE* foo = fopen("/Users/user/cs_log_err", "a"); \
+        FILE* foo = fopen("/tmp/cs_log_err", "a"); \
         fprintf(stderr, "%s +%d, %s() Error: ", __FILE__, __LINE__, __FUNCTION__); \
         fprintf(stderr, (format), ##__VA_ARGS__); \
         fclose(foo); \
@@ -27,7 +29,7 @@
     #ifdef __APPLE__
         #include <unistd.h>
         #define print_d(format, ...) do { \
-            FILE* foo = fopen("/Users/user/cs_log_debug", "a"); \
+            FILE* foo = fopen("/tmp/cs_log_debug", "a"); \
             fprintf(foo, "%s +%d, %s(): ", __FILE__, __LINE__, __FUNCTION__); \
             fprintf(foo, (format), ##__VA_ARGS__); \
             fclose(foo); \
@@ -36,6 +38,7 @@
         #define print_d(format, ...) do { \
             fprintf(stdout, "%s +%d, %s(): ", __FILE__, __LINE__, __FUNCTION__); \
             fprintf(stdout, (format), ##__VA_ARGS__); \
+            fflush(stdout); \
         } while(0)
     #endif
 #else
@@ -44,6 +47,7 @@
 
 static inline void print_backtrace()
 {
+#ifndef Q_OS_WIN /*
     void* callstack[128];
     int i, frames = backtrace(callstack, 128);
     char** strs = backtrace_symbols(callstack, frames);
@@ -51,6 +55,8 @@ static inline void print_backtrace()
         printf("%s\n", strs[i]);
     }
     free(strs);
+*/
+#endif
 }
 
 
