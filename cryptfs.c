@@ -547,7 +547,7 @@ static int fs_getattr(const char *path, struct stat *st)
 {
     struct cryptfs *cfs = (struct cryptfs *)
                            fuse_get_context()->private_data;
-    char *encrypted_path;
+    char *encrypted_path = NULL;
     struct stat cs;
     struct file_header_format *file_header;
     int rc = -1;
@@ -890,7 +890,7 @@ static int fs_write(const char *path, const char *buf,
     int rc;
     off_t block_num;
     off_t new_size;
-    struct buf *data_block;
+    struct buf *data_block = NULL;
     uint free_block_space;
     uint part_size, block_offset;
     int wrote_size = -1;
@@ -1651,7 +1651,7 @@ int cryptfs_mount(struct cryptfs *cfs, const char *mount_point_folder, const cha
     struct buf *pass = NULL;
 #ifdef __APPLE__
     char *mount_point = strdup(mount_point_folder);
-    void* fuse_args_osx = kref_sprintf("volname=%s,local,allow_other,remember=0,noappledouble,noapplexattr", basename(mount_point));
+    void* fuse_args_osx = kref_sprintf("volname=%s,local,allow_other", basename(mount_point));
     print_d("mount_point name is %s\n", basename(mount_point));
     free(mount_point);
     char *argv[] = {"test", "-o", fuse_args_osx, NULL};
