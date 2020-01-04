@@ -45,21 +45,21 @@ void list_init(struct list *list)
  */
 void list_clear(struct list *list)
 {
-	struct le *le;
+    struct le *le;
 
-	if (!list)
-		return;
+    if (!list)
+        return;
 
-	le = list->head;
-	while (le) {
-		struct le *next = le->next;
-		le->list = NULL;
-		le->prev = le->next = NULL;
-		le->data = NULL;
-		le = next;
-	}
+    le = list->head;
+    while (le) {
+        struct le *next = le->next;
+        le->list = NULL;
+        le->prev = le->next = NULL;
+        le->data = NULL;
+        le = next;
+    }
 
-	list_init(list);
+    list_init(list);
 }
 
 
@@ -72,24 +72,24 @@ void list_clear(struct list *list)
  */
 void list_append(struct list *list, struct le *le, void *data)
 {
-	if (!list || !le)
-		return;
+    if (!list || !le)
+        return;
 
-	if (le->list)
-		return;
+    if (le->list)
+        return;
 
-	le->prev = list->tail;
-	le->next = NULL;
-	le->list = list;
-	le->data = data;
+    le->prev = list->tail;
+    le->next = NULL;
+    le->list = list;
+    le->data = data;
 
-	if (!list->head)
-		list->head = le;
+    if (!list->head)
+        list->head = le;
 
-	if (list->tail)
-		list->tail->next = le;
+    if (list->tail)
+        list->tail->next = le;
 
-	list->tail = le;
+    list->tail = le;
 }
 
 
@@ -101,26 +101,26 @@ void list_append(struct list *list, struct le *le, void *data)
  */
 void list_unlink(struct le *le)
 {
-	struct list *list;
+    struct list *list;
 
-	if (!le || !le->list)
-		return;
+    if (!le || !le->list)
+        return;
 
-	list = le->list;
+    list = le->list;
 
-	if (le->prev)
-		le->prev->next = le->next;
-	else
-		list->head = le->next;
+    if (le->prev)
+        le->prev->next = le->next;
+    else
+        list->head = le->next;
 
-	if (le->next)
-		le->next->prev = le->prev;
-	else
-		list->tail = le->prev;
+    if (le->next)
+        le->next->prev = le->prev;
+    else
+        list->tail = le->prev;
 
-	le->next = NULL;
-	le->prev = NULL;
-	le->list = NULL;
+    le->next = NULL;
+    le->prev = NULL;
+    le->list = NULL;
 }
 
 
@@ -136,7 +136,7 @@ void list_unlink(struct le *le)
  */
 struct le *list_head(const struct list *list)
 {
-	return list ? list->head : NULL;
+    return list ? list->head : NULL;
 }
 
 
@@ -149,7 +149,7 @@ struct le *list_head(const struct list *list)
  */
 struct le *list_tail(const struct list *list)
 {
-	return list ? list->tail : NULL;
+    return list ? list->tail : NULL;
 }
 
 
@@ -162,14 +162,14 @@ struct le *list_tail(const struct list *list)
  */
 int list_count(const struct list *list)
 {
-	int n = 0;
-	struct le *le;
+    int n = 0;
+    struct le *le;
 
-	if (!list)
-		return 0;
+    if (!list)
+        return 0;
 
-	for (le = list->head; le; le = le->next)
-		++n;
+    for (le = list->head; le; le = le->next)
+        ++n;
 
-	return n;
+    return n;
 }

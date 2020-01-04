@@ -3,9 +3,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-#ifndef __unix__
-//	#define stat FUSE_STAT
-#endif
+
 #include "kref_alloc.h"
 
 struct cryptfs {
@@ -41,8 +39,8 @@ struct cryptfs {
 #define DATA_FILE_TWEAK_LEN 16
 #define DATA_FILE_BLOCK_LEN 4096 // Needs 4096
 
-#ifndef __unix__
-typedef long off_t;
+#ifdef _WIN32
+    typedef long off_t;
 #endif
 struct file_header_format {
     u8 tweak[DATA_FILE_TWEAK_LEN];

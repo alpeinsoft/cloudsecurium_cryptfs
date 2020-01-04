@@ -5,12 +5,12 @@
 struct aes256xts;
 void crypher_init();
 int crypher_aes256gcm_encrypt(struct buf *src,
-	        	              struct buf **dst, struct buf **tag,
-		                      struct buf *iv, struct buf *key);
+                              struct buf **dst, struct buf **tag,
+                              struct buf *iv, struct buf *key);
 
 int crypher_aes256gcm_decrypt(struct buf *src, struct buf **dst,
-							  struct buf *tag, struct buf *iv,
-							  struct buf *key);
+                              struct buf *tag, struct buf *iv,
+                              struct buf *key);
 
 struct aes256xts *crypher_aes256xts_create(struct buf *key,
                                            struct buf *tweak,

@@ -19,10 +19,6 @@ set(cryptfs_SRCS
     list.c
 )
 
-if(MSVC)
-    list(APPEND cryptfs_SRCS dirent.c required_posix.c)
-    list(APPEND cryptfs_HEADERS dirent.h required_posix.h)
-endif()
 
 # These headers are installed for libowncloudsync to be used by 3rd party apps
 set(cryptfs_HEADERS
@@ -36,7 +32,16 @@ set(cryptfs_HEADERS
     kref_alloc.h
     list.h
     types.h
+    cfs_syscall.h
 )
+
+if(MSVC)
+    list(APPEND cryptfs_SRCS win_dirent.c cfs_syscall_windows.c)
+    list(APPEND cryptfs_HEADERS win_dirent.h)
+else()
+    list(APPEND cryptfs_SRCS cfs_syscall_unix.c)
+endif()
+
 add_definitions(-O3 -D_FILE_OFFSET_BITS=64 -DFUSE_USE_VERSION=26)
 
 add_library(${PROJECT_NAME} SHARED ${cryptfs_SRCS})

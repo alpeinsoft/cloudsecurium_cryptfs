@@ -1,12 +1,13 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include "common.h"
+#include "cfs_syscall.h"
 
 int dir_exist(const char *path)
 {
-    struct stat s;
+    CFS_STAT s;
     int rc;
-    rc = stat(path, &s);
+    rc = cfs_stat(path, &s);
     if (rc)
         return FALSE;
     return (s.st_mode & S_IFDIR) && 1;
@@ -14,9 +15,9 @@ int dir_exist(const char *path)
 
 int file_exist(const char *path)
 {
-    struct stat s;
+    CFS_STAT s;
     int rc;
-    rc = stat(path, &s);
+    rc = cfs_stat(path, &s);
     if (rc)
         return FALSE;
     return (s.st_mode & S_IFREG) && 1;

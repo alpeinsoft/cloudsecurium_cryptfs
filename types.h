@@ -8,20 +8,29 @@
 
 typedef unsigned char u8;
 typedef unsigned int u32;
-#ifdef __unix__
-#ifndef __cplusplus
-typedef u8 bool;
-#endif
+
+#ifdef _WIN32
+    #ifndef __cplusplus
+        #include <stdbool.h>
+    #endif
 #else
-#ifndef __cplusplus
-#include <stdbool.h>
-#endif
+    #ifndef __cplusplus
+        typedef u8 bool;
+    #endif
 #endif
 typedef u8 byte;
 typedef unsigned int uint;
 typedef unsigned long ulong;
 
-#ifdef __unix__
+#ifdef _WIN32
+    #include <BaseTsd.h>
+    typedef SSIZE_T ssize_t;
+    typedef long off_t;
+    #ifndef mode_t
+        typedef int mode_t;
+    #endif
+#endif
+
 /**
  * container_of - cast a member of a structure out to the containing structure
  * @ptr:        the pointer to the member.
@@ -29,11 +38,6 @@ typedef unsigned long ulong;
  * @member:     the name of the member within the struct.
  *
  */
-#define container_of(ptr, type, member) ({                      \
-        typeof( ((type *)0)->member ) *__mptr = (ptr);  \
-        (type *)( (char *)__mptr - offsetof(type,member) );})
-#else
-#define container_of(ptr, type, member) (type *)( (char *)(ptr) - offsetof(type,member) )
-#endif
+#define container_of(ptr, type, member) (type *)( (u8 *)(ptr) - offsetof(type,member) )
 
 #endif

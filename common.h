@@ -1,6 +1,6 @@
 #include <stdarg.h>
-#ifndef Q_OS_WIN
-//#include <execinfo.h>
+#ifdef __unix__
+    #include <execinfo.h>
 #endif
 #include "types.h"
 #include "buf.h"
@@ -8,6 +8,7 @@
 
 #ifndef COMMON_H_
 #define COMMON_H_
+
 //#define CRYPTFS_OSX_DEBUG
 
 #if defined(__APPLE__) && defined(CRYPTFS_OSX_DEBUG)
@@ -47,7 +48,7 @@
 
 static inline void print_backtrace()
 {
-#ifndef Q_OS_WIN /*
+#ifdef __unix__
     void* callstack[128];
     int i, frames = backtrace(callstack, 128);
     char** strs = backtrace_symbols(callstack, frames);
@@ -55,7 +56,6 @@ static inline void print_backtrace()
         printf("%s\n", strs[i]);
     }
     free(strs);
-*/
 #endif
 }
 
