@@ -7,6 +7,24 @@ if(MSVC)
     set(BUILD_SHARED_LIBS TRUE)
 endif()
 
+OPTION(CRYPTFS_DEBUG "Enable debug output in cryptfs" OFF)
+if(CRYPTFS_DEBUG)
+    message(STATUS "CRYPTFS_DEBUG ON")
+    add_definitions(-DCRYTPFS_DEBUG)
+endif()
+
+OPTION(CRYPTFS_REDIRECT_DEBUG_TO_FILE "Redirect debug messages from cryptfs from stdout to file" OFF)
+if(CRYPTFS_REDIRECT_DEBUG_TO_FILE)
+    message(STATUS "CRYPTFS_REDIRECT_DEBUG_TO_FILE ON")
+    add_definitions(-DCRYPTFS_REDIRECT_DEBUG_TO_FILE)
+endif()
+
+OPTION(CRYPTFS_REDIRECT_ERRORS_TO_FILE "Redirect error messages from cryptfs from stderr to file" OFF)
+if(CRYPTFS_REDIRECT_ERRORS_TO_FILE)
+    message(STATUS "CRYPTFS_REDIRECT_ERRORS_TO_FILE ON")
+    add_definitions(-DCRYPTFS_REDIRECT_ERRORS_TO_FILE)
+endif()
+
 set(cryptfs_SRCS
     base32.c
     buf.c
