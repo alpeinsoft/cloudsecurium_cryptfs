@@ -83,14 +83,25 @@ elseif(UNIX)
         PRIVATE fuse
         )
 else()
-    include_directories("E:/windows/dokany/dokan_fuse/include")
-    link_directories("E:/windows/dokany/dokan_fuse/build/Release")
-    find_library(dokanfuse NAMES "dokanfuse1" HINTS "E:/windows/dokany/dokan_fuse/build/Release")
-    message("======================================>${dokanfuse}")
-    target_link_libraries(${PROJECT_NAME}
-            PRIVATE ${dokanfuse}
+    add_library(DOKANFUSE SHARED IMPORTED)
+    set_property(
+        TARGET DOKANFUSE
+        PROPERTY IMPORTED_LOCATION ${DOKANFUSE_ROOT_DIR}/dokanfuse1.dll
         )
-target_link_directories(${PROJECT_NAME} PUBLIC "E:/windows/dokany/dokan_fuse/build/Release")
+    set_property(
+        TARGET DOKANFUSE
+        PROPERTY IMPORTED_IMPLIB ${DOKANFUSE_ROOT_DIR}/lib/dokanfuse1.lib
+        )
+
+    target_include_directories(${PROJECT_NAME}
+        PRIVATE ${DOKANFUSE_ROOT_DIR}/include
+        )
+    target_link_directories(${PROJECT_NAME}
+        PRIVATE ${DOKANFUSE_ROOT_DIR}
+    )
+    target_link_libraries(${PROJECT_NAME}
+            PRIVATE DOKANFUSE
+        )
 endif()
 
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
