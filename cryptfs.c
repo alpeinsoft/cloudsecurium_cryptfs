@@ -1711,7 +1711,7 @@ int cryptfs_mount(struct cryptfs *cfs, const char *mount_point_folder, const cha
     struct buf *pass = NULL;
 #ifdef __APPLE__
     char *mount_point = strdup(mount_point_folder);
-    void* fuse_args_osx = kref_sprintf("volname=%s,local,allow_other", basename(mount_point));
+    void* fuse_args_osx = kref_sprintf("volname=%s", basename(mount_point));
     print_d("mount_point name is %s\n", basename(mount_point));
     free(mount_point);
     char *argv[] = {"test", "-o", fuse_args_osx, NULL};
