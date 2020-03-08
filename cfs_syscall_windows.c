@@ -6,6 +6,8 @@
 #include <errno.h>
 #include <stdbool.h>
 #include "types.h"
+#include "kref_alloc.h"
+#include "common.h"
 
 ssize_t cfs_pwrite(int fd, const void *buf, size_t size, off_t offset)
 {
@@ -154,4 +156,40 @@ int cfs_creat(const char *path, mode_t mode)
 int cfs_stat(const char *path, struct _stat * st)
 {
     return _stat(path, st);
+}
+
+FILE *cfs_fopen(const char *path, const char *mode)
+{
+    FILE *file = NULL;
+    wchar_t *wpath = NULL;
+    wchar_t *wmode = NULL;
+    int len;
+
+    len = strlen(path) + 1;
+    wpath = kref_alloc(2*len, NULL);
+    if (!wpath) {
+        print_e("Can't allocate memory for path\n");
+        goto out;
+    }
+    if (mbstowcs(wpath, path, len) == -1) {
+        print_e("Can't convert path\n");
+        goto out;
+    }
+
+    len = strlen(mode) + 1;
+    wmode = kref_alloc(2*len, NULL);
+    if (!wmode) {
+        print_e("Can't allocate memory for mode\n");
+        goto out;
+    }
+    if (mbstowcs(wmode, mode, len) == -1) {
+        print_e("Can't convert mode\n");
+        goto out;
+    }
+
+    file = _wfopen(wpath, wmode);
+out:
+    kmem_deref(&wpath);
+    kmem_deref(&wmode);
+    return file;
 }

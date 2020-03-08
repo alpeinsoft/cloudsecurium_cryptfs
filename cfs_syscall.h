@@ -5,6 +5,7 @@
 extern "C" {
 #endif
 
+#include <stdio.h>
 #include "types.h"
 #ifndef _WIN32
     #include <sys/types.h>
@@ -31,6 +32,7 @@ int cfs_rmdir(const char *dirname);
 int cfs_unlink(const char *filename);
 int cfs_access(const char *path, int mode);
 int cfs_creat(const char *path, mode_t mode);
+FILE *cfs_fopen(const char *path, const char *mode);
 #ifndef _WIN32
     int cfs_stat(const char *path, struct stat *st);
 #else

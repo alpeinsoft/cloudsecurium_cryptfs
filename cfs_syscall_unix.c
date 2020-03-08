@@ -3,6 +3,7 @@
 #include <sys/statvfs.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <stdio.h>
 
 ssize_t cfs_pwrite(int fd, const void *buf, size_t count, off_t offset)
 {
@@ -67,4 +68,9 @@ int cfs_creat(const char *path, mode_t mode)
 int cfs_stat(const char *path, struct stat *st)
 {
     return stat(path, st);
+}
+
+FILE *cfs_fopen(const char *path, const char *mode)
+{
+    return fopen(path, mode);
 }
