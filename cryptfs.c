@@ -474,12 +474,21 @@ static char *encrypt_path(struct cryptfs *cfs,
     p = (char *)crypt_path->data;
     memcpy(p, path_prefix, path_prefix_len);
     p += path_prefix_len;
-    if (path_prefix[path_prefix_len - 1] == '/')
+    if (path_prefix[path_prefix_len - 1] == '/'
+#ifndef _WIN32
+            )
+#else
+            || path_prefix[path_prefix_len - 1] == '\\')
+#endif
         p--;
 
     LIST_FOREACH(crypted_parts, le) {
         struct buf *crypted_part = list_ledata(le);
+#ifndef _WIN32
         *p++ = '/';
+#else
+        *p++ = '\\';
+#endif
         memcpy(p, crypted_part->data, crypted_part->len - 1);
         p += crypted_part->len - 1;
     }
@@ -1680,7 +1689,14 @@ struct cryptfs *cryptfs_create(const char *crypted_folder, const char *keys_file
         goto out;
     }
 
+#ifndef _WIN32
     cfs->folder = kref_strdub(crypted_folder);
+#else
+    cfs->folder = kref_sprintf("\\\\?\\%s", crypted_folder);
+    for(char *p = (char *)cfs->folder; *p; p++)
+        if (*p == '/')
+            *p = '\\';
+#endif
     if (!cfs->folder) {
         print_e("Can't copy crypted_folder\n");
         goto out;
