@@ -1058,6 +1058,13 @@ static int fs_mkdir(const char* path, mode_t mode)
     int rc = -1;
     print_d("fs_mkdir %s\n", path);
 
+#ifdef __unix__))
+    if (!memcmp(path, "/.Trash", 6)) {
+        rc = -EACCES;
+        goto out;
+    }
+#endif
+
     encrypted_path = encrypt_path(cfs, path, cfs->folder);
     if (!encrypted_path) {
         print_e("Can't encrypt path %s\n", path);
