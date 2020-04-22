@@ -8,6 +8,7 @@
 #include "types.h"
 #include "kref_alloc.h"
 #include "common.h"
+#include <string.h>
 
 ssize_t cfs_pwrite(int fd, const void *buf, size_t size, off_t offset)
 {
@@ -36,13 +37,21 @@ int cfs_statvfs(const char *path, struct statvfs *ret)
     ULONGLONG free_bytes_available; // for user - similar to bavail
     ULONGLONG total_number_of_bytes;
     ULONGLONG total_number_of_free_bytes; // for everyone - bfree
+    char *augmented_path = NULL;
 
-    if (!GetDiskFreeSpaceEx(
+    // GetDiskFreeSpaceExA requires UNC names to be ended with backslash
+    if (!strncmp(path, "\\\\?\\", 4) && path[strlen(path)-1] != '\\')
+        augmented_path = kref_sprintf("%s\\", path);
+    path = augmented_path ? augmented_path : path;
+
+    if (!GetDiskFreeSpaceExA(
             path,
             (PULARGE_INTEGER) &free_bytes_available,
             (PULARGE_INTEGER) &total_number_of_bytes,
-            (PULARGE_INTEGER) &total_number_of_free_bytes))
+            (PULARGE_INTEGER) &total_number_of_free_bytes)) {
+        kmem_deref(&augmented_path);
         return -errno;
+    }
 
     if (total_number_of_bytes < 16ULL * 1024 * 1024 * 1024 * 1024)
         ret->f_bsize = 4096;
@@ -67,6 +76,7 @@ int cfs_statvfs(const char *path, struct statvfs *ret)
     ret->f_flag = -1;
     ret->f_namemax = FILENAME_MAX;
 
+    kmem_deref(&augmented_path);
     return 0;
 }
 
